@@ -34,11 +34,11 @@ void FAutoLinkModule::StartupModule()
 {
     if (WITH_EDITOR)
     {
-        AL_LOG(Verbose, TEXT("Not hooking anything because WITH_EDITOR is true!"));
+        AL_LOG(Verbose, TEXT("StartupModule: Not hooking anything because WITH_EDITOR is true!"));
         return;
     }
 
-    AL_LOG(Verbose, TEXT("Hooking ConfigureComponents..."));
+    AL_LOG(Verbose, TEXT("StartupModule: Hooking ConfigureComponents..."));
 
     auto defaultBuildableHologram = GetMutableDefault<AFGBuildableHologram>();
     SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBuildableHologram::ConfigureComponents, defaultBuildableHologram, FAutoLinkModule::ConfigureComponentsHook);
