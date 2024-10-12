@@ -30,7 +30,7 @@
 		{
 			"Name": "AbstractInstance",
 			"Enabled": true,
-			"SemVersion": ""
+			"BasePlugin": true
 		}
 	],
 	"SemVersion": "0.1.0",
