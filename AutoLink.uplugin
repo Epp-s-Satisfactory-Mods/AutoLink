@@ -2,10 +2,10 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0.0",
-	"FriendlyName": "Auto Link",
-	"Description": "Automatically link belts and pipes when a linkable structure is built next to them",
+	"FriendlyName": "Auto Link Belts and Pipes",
+	"Description": "Automatically link existing belts/pipelines to buildings that are already positioned correctly.",
 	"Category": "Modding",
-	"CreatedBy": "Eppifactory",
+	"CreatedBy": "Epp",
 	"CreatedByURL": "",
 	"DocsURL": "",
 	"MarketplaceURL": "",
@@ -25,10 +25,14 @@
 		{
 			"Name": "SML",
 			"Enabled": true,
-			"SemVersion": "^3.8.0-dev"
+			"SemVersion": "^3.8.0"
+		},
+		{
+			"Name": "AbstractInstance",
+			"Enabled": true,
+			"SemVersion": ""
 		}
 	],
 	"SemVersion": "1.0.0",
-	"GameVersion": ">=365306",
-	"RequiredOnRemote": false
+	"GameVersion": ">=365306"
 }
