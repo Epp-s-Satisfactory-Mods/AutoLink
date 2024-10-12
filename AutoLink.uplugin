@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "1.0.0",
+	"Version": 0,
+	"VersionName": "0.1.0",
 	"FriendlyName": "Auto Link Belts and Pipes",
 	"Description": "Automatically link existing belts/pipelines to constructed buildings that are already positioned correctly.",
 	"Category": "Modding",
@@ -33,6 +33,6 @@
 			"SemVersion": ""
 		}
 	],
-	"SemVersion": "1.0.0",
+	"SemVersion": "0.1.0",
 	"GameVersion": ">=365306"
 }
