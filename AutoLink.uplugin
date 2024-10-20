@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
 	"Version": 0,
-	"VersionName": "0.1.0",
-	"FriendlyName": "Auto Link Belts and Pipes",
-	"Description": "Automatically link existing belts/pipelines to constructed buildings that are already positioned correctly.",
+	"VersionName": "0.2.0",
+	"FriendlyName": "Auto Link",
+	"Description": "If things look connected, they will be connected. Blueprints tile and structures automatically hook up to all incoming/outgoing connections.",
 	"Category": "Modding",
 	"CreatedBy": "Epp",
 	"CreatedByURL": "",
@@ -33,6 +33,6 @@
 			"BasePlugin": true
 		}
 	],
-	"SemVersion": "0.1.0",
+	"SemVersion": "0.2.0",
 	"GameVersion": ">=365306"
 }
