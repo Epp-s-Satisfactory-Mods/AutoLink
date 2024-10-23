@@ -12,23 +12,6 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogAutoLink, Verbose, All);
 
-struct FactoryConnectionCandidate
-{
-public:
-    FactoryConnectionCandidate(
-        UFGFactoryConnectionComponent* connectionComponent,
-        float minConnectorDistance,
-        float maxConnectorDistance) :
-        ConnectionComponent(connectionComponent),
-        MinConnectorDistance(minConnectorDistance),
-        MaxConnectorDistance(maxConnectorDistance)
-    {}
-
-    UFGFactoryConnectionComponent* ConnectionComponent;
-    float MinConnectorDistance;
-    float MaxConnectorDistance;
-};
-
 class FAutoLinkModule : public FDefaultGameModuleImpl
 {
 public:

@@ -3,18 +3,18 @@
 #include "AbstractInstanceManager.h"
 #include "FGBlueprintHologram.h"
 #include "FGBuildableConveyorBase.h"
+#include "FGBuildableConveyorBelt.h"
 #include "FGBuildableConveyorLift.h"
 #include "FGBuildablePipeHyper.h"
 #include "FGBuildablePipeline.h"
 #include "FGBuildableRailroadTrack.h"
+#include "FGBuildableSubsystem.h"
 #include "FGFactoryConnectionComponent.h"
 #include "FGFluidIntegrantInterface.h"
 #include "FGPipeConnectionComponent.h"
-#include "FGPipeConnectionFactory.h"
 #include "FGPipeSubsystem.h"
 #include "FGRailroadTrackConnectionComponent.h"
 #include "Hologram/FGBuildableHologram.h"
-#include "Hologram/FGConveyorAttachmentHologram.h"
 #include "InstanceData.h"
 #include "Patching/NativeHookManager.h"
 
@@ -33,6 +33,7 @@ DEFINE_LOG_CATEGORY(LogAutoLink)
 #else
 #define AL_LOG(Verbosity, Format, ...)
 #endif
+
 
 void FAutoLinkModule::StartupModule()
 {
@@ -69,9 +70,9 @@ void FAutoLinkModule::StartupModule()
         });
 
     SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBuildableHologram::ConfigureComponents, GetMutableDefault<AFGBuildableHologram>(),
-        [](const AFGBuildableHologram* buildableHologram, AFGBuildable* buildable)
+        [](const AFGBuildableHologram* hologram, AFGBuildable* buildable)
         {
-            AL_LOG(Verbose, TEXT("ConfigureComponentsHook: The hologram is %s and buildable is %s at %s"), *buildableHologram->GetName(), *buildable->GetName(), *buildable->GetActorLocation().ToString());
+            AL_LOG(Verbose, TEXT("AFGBuildableHologram::ConfigureComponents: The hologram is %s and buildable is %s at %s"), *hologram->GetName(), *buildable->GetName(), *buildable->GetActorLocation().ToString());
             FindAndLinkForBuildable(buildable);
         });
 }
@@ -79,7 +80,7 @@ void FAutoLinkModule::StartupModule()
 void FAutoLinkModule::FindAndLinkForBuildable(AFGBuildable* buildable)
 {
     AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Buildable is %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
-    
+
     // Belt connections
     {
         TInlineComponentArray<UFGFactoryConnectionComponent*> openConnections;
@@ -182,7 +183,7 @@ void FAutoLinkModule::FindOpenBeltConnections(TInlineComponentArray<UFGFactoryCo
         buildable->GetComponents(factoryConnections);
         for (auto connectionComponent : factoryConnections)
         {
-            AL_LOG(Verbose, TEXT("\tFindOpenBeltConnections: Found UFGFactoryConnectionComponent"));
+            AL_LOG(Verbose, TEXT("FindOpenBeltConnections:\tFound UFGFactoryConnectionComponent"));
             AddIfOpen(openConnections, connectionComponent);
         }
     }
@@ -389,14 +390,39 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         return;
     }
 
-    // UFGFactoryConnectionComponent::FindCompatibleOverlappingConnection doesn't doesn't do the trick here; it doesn't detect conveyor lifts so we have
-    // to fall back to doing the search ourselves.
+    // Belts need to be right up against the connectors, but conveyor lifts have some other cases that we will address
+    float searchDistance;
+    auto outerBuildable = connectionComponent->GetOuterBuildable();
+    auto connectionConveyorBelt = Cast<AFGBuildableConveyorBelt>(outerBuildable);
+    AFGBuildableConveyorLift* connectionConveyorLift = nullptr;
+    if (connectionConveyorBelt)
+    {
+        // If this is a belt then it in needs to be against the connector, but search
+        // a little bit outward to be sure we hit any buildable containing a connector
+        searchDistance = 10.0;
+    }
+    else if ((connectionConveyorLift = Cast<AFGBuildableConveyorLift>(outerBuildable)) != nullptr)
+    {
+        // If this is a conveyor lift, then there could be another conveyor lift facing it
+        // A single conveyor lift can have its bellows extended to 300 units away, so we have
+        // to search twice that distance plus a bit to ensure we hit the buildable
+        searchDistance = 610.0;
+    }
+    else
+    {
+        // If this is a normal factory/buildable, it could still be aligned with a fully-extended
+        // conveyor lift and we still pad a bit to ensure an appropriate hit
+        searchDistance = 310.0;
+    }
 
-    const float MAX_FACTORY_CONNECTOR_SEARCH_DISTANCE = 301.0f; // One more than the furthest away a compatible connector can be (in this case, a conveyor lift)
     auto connectorLocation = connectionComponent->GetConnectorLocation();
-    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * MAX_FACTORY_CONNECTOR_SEARCH_DISTANCE);
+    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * searchDistance);
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Connector at: %s, searchEnd is at: %s, direction is: %d"), *connectorLocation.ToString(), *searchEnd.ToString(), connectionDirection);
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Connector at: %s, searchEnd is at: %s, searchDistance is %f, direction is: %d"),
+        *connectorLocation.ToString(),
+        *searchEnd.ToString(),
+        searchDistance,
+        connectionDirection);
 
     TArray< AActor* > hitActors;
     HitScan(
@@ -404,46 +430,23 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         connectionComponent->GetWorld(),
         connectorLocation,
         searchEnd,
-        connectionComponent->GetOwner());
+        outerBuildable);
 
     // 12 is a random guess of the max possible candidates we could ever really see
-    TArray<FactoryConnectionCandidate, TInlineAllocator<12>> candidates;
+    TArray<UFGFactoryConnectionComponent*, TInlineAllocator<12>> candidates;
     for (auto actor : hitActors)
     {
-        if (auto buildableConveyor = Cast<AFGBuildableConveyorBase>(actor))
+        if (auto hitConveyor = Cast<AFGBuildableConveyorBase>(actor))
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining buildable conveyor base %s of type %s"), *buildableConveyor->GetName(), *buildableConveyor->GetClass()->GetName());
-            // Conveyor belts or conveyor lift
-            const float CONVEYOR_LIFT_MIN_DISTANCE = 100.f; // Conveyor lifts have some natural clearance
-            auto minConnectorDistance = 0.0f;
-            auto maxConnectorDistance = 0.0f; // Conveyor belts have to be touching the connector; if it's a conveyor lift, we'll change this accordingly in a bit
-            auto conveyorLift = Cast<AFGBuildableConveyorLift>(actor);
+            // Special case for when we can get at the connections without scanning all the components
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining conveyor %s of type %s"), *hitConveyor->GetName(), *hitConveyor->GetClass()->GetName());
+            auto candidateConnection = connectionDirection == EFactoryConnectionDirection::FCD_INPUT
+                ? hitConveyor->GetConnection1()
+                : hitConveyor->GetConnection0();
 
-            switch (connectionDirection)
-            {
-            case EFactoryConnectionDirection::FCD_INPUT:
-                if (conveyorLift)
-                {
-                    minConnectorDistance = CONVEYOR_LIFT_MIN_DISTANCE;
-                    maxConnectorDistance =
-                        buildableConveyor->GetConnection1()->GetConnectorClearance() + // Connection1 is always the output connection
-                        conveyorLift->mOpposingConnectionClearance[1]; // If the conveyor bellows extended to snap on construction, the clearance through which they snapped will be here
-                }
-                candidates.Add(FactoryConnectionCandidate(buildableConveyor->GetConnection1(), minConnectorDistance, maxConnectorDistance));
-                break;
-            case EFactoryConnectionDirection::FCD_OUTPUT:
-                if (conveyorLift)
-                {
-                    minConnectorDistance = CONVEYOR_LIFT_MIN_DISTANCE;
-                    maxConnectorDistance =
-                        buildableConveyor->GetConnection0()->GetConnectorClearance() + // Connection0 is always the input connection
-                        conveyorLift->mOpposingConnectionClearance[0]; // If the conveyor bellows extended to snap on construction, the clearance through which they snapped will be here
-                }
-                candidates.Add(FactoryConnectionCandidate(buildableConveyor->GetConnection0(), minConnectorDistance, maxConnectorDistance));
-                break;
-            }
+            candidates.Add(candidateConnection);
         }
-        else if (auto buildable = Cast<AFGBuildable>(actor))
+        if (auto buildable = Cast<AFGBuildable>(actor))
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining buildable %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
             TInlineComponentArray<UFGFactoryConnectionComponent*> openConnections;
@@ -451,55 +454,117 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
 
             for (auto openConnection : openConnections)
             {
-                candidates.Add(FactoryConnectionCandidate(openConnection, 0, 0));
+                candidates.Add(openConnection);
             }
         }
         else
         {
+            // This shouldn't really happen but if it does, I'd like a message in the log while testing
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Ignoring hit result actor %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
         }
     }
 
     float closestDistanceSq = FLT_MAX;
     UFGFactoryConnectionComponent* compatibleConnectionComponent = nullptr;
-    for (auto& candidate : candidates)
+    for (auto& candidateConnection : candidates)
     {
-        auto otherConnection = candidate.ConnectionComponent;
-        auto minConnectorDistance = candidate.MinConnectorDistance;
-        auto maxConnectorDistance = candidate.MaxConnectorDistance;
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining connection: %s on %s."),
+            *candidateConnection->GetName(),
+            *candidateConnection->GetOuterBuildable()->GetName());
 
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining connection: %s (%s). Min distance %f. Max distance: %f"),
-            *otherConnection->GetName(),
-            *otherConnection->GetClass()->GetName(),
-            minConnectorDistance,
-            maxConnectorDistance);
-
-        if (!IsValid(otherConnection))
+        if (!IsValid(candidateConnection))
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tNot valid!"));
             continue;
         }
 
-        if (otherConnection == compatibleConnectionComponent)
+        if (candidateConnection == compatibleConnectionComponent)
         {
             // Sometimes the resolving the hit scan yields multiple hits on the same component; we can short-circuit that here.
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tRedundant! This is already the best candidate."));
             continue;
         }
 
-        if (otherConnection->IsConnected())
+        if (candidateConnection->IsConnected())
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tAlready connected!"));
             continue;
         }
 
-        if (!otherConnection->CanConnectTo(connectionComponent))
+        if (!candidateConnection->CanConnectTo(connectionComponent))
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tCannot be connected to this!"));
             continue;
         }
 
-        const FVector otherLocation = otherConnection->GetConnectorLocation();
+        // Now that the quickest checks are done, check distances
+        auto minConnectorDistance = 0.0f;
+        auto maxConnectorDistance = 0.0f;
+
+        auto candidateOuterBuildable = candidateConnection->GetOuterBuildable();
+        if (auto candidateConveyorBelt = Cast<AFGBuildableConveyorBelt>(candidateOuterBuildable))
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tCandidate connection is on conveyor belt %s"), *candidateConveyorBelt->GetName());
+            // If the candidate is a belt, leave the distances at 0, since the belt has to be up against the connector.
+        }
+        else if (auto candidateConveyorLift = Cast<AFGBuildableConveyorLift>(candidateOuterBuildable))
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tCandidate connection is on conveyor lift %s"), *candidateConveyorLift->GetName());
+            if (connectionConveyorLift)
+            {
+                // Scanning from a lift and hit a lift, so max distance will depend on the bellows of both lifts
+                minConnectorDistance = 100.0; // Prevent conveyor lifts from smashing into and protruding past each other
+                // At the very least, they can be their combined connector clearances away. May be further based on bellows
+                maxConnectorDistance = connectionComponent->GetConnectorClearance() + candidateConnection->GetConnectorClearance();
+
+                switch (connectionDirection)
+                {
+                    // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
+                case EFactoryConnectionDirection::FCD_INPUT:
+                    maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[0];
+                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[1];
+                    break;
+                case EFactoryConnectionDirection::FCD_OUTPUT:
+                    maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[1];
+                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[0];
+                    break;
+                }
+            }
+            else
+            {
+                // Scanning from a buildable and hit a lift, so max distance will depend on the bellows of the hit lift
+                minConnectorDistance = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
+                maxConnectorDistance = candidateConnection->GetConnectorClearance();
+                switch (connectionDirection)
+                {
+                    // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
+                case EFactoryConnectionDirection::FCD_INPUT:
+                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[1];
+                    break;
+                case EFactoryConnectionDirection::FCD_OUTPUT:
+                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[0];
+                    break;
+                }
+            }
+        }
+        else if (connectionConveyorLift)
+        {
+            // Scanning from a lift and hit a buildable, so max distance will depend on the bellows of the lift
+            minConnectorDistance = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
+            maxConnectorDistance = connectionComponent->GetConnectorClearance();
+            switch (connectionDirection)
+            {
+                // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
+            case EFactoryConnectionDirection::FCD_INPUT:
+                maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[0];
+                break;
+            case EFactoryConnectionDirection::FCD_OUTPUT:
+                maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[1];
+                break;
+            }
+        }
+
+        const FVector otherLocation = candidateConnection->GetConnectorLocation();
         const FVector fromOtherToConnectorVector = connectorLocation - otherLocation; // This gives the vector from the other connection to the main connector
         const float distanceSq = fromOtherToConnectorVector.SquaredLength();
         const float minDistanceSq = minConnectorDistance == 0.0f ? 0.0f : ((minConnectorDistance * minConnectorDistance) - 1); // Give a little padding for floating points
@@ -512,7 +577,7 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         }
 
         const FVector connectorNormal = connectionComponent->GetConnectorNormal();
-        const FVector otherConnectorNormal = otherConnection->GetConnectorNormal();
+        const FVector otherConnectorNormal = candidateConnection->GetConnectorNormal();
 
         // Determine if the connection components are aligned. If the cross product is 0, they are on the same line
         const FVector crossProduct = FVector::CrossProduct(connectorNormal, otherConnectorNormal);
@@ -530,7 +595,7 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound one that's less than 1 cm away; take it as the best result. Location: %s"), *otherLocation.ToString());
             closestDistanceSq = distanceSq;
-            compatibleConnectionComponent = otherConnection;
+            compatibleConnectionComponent = candidateConnection;
             break;
         }
 
@@ -552,7 +617,7 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound a new closest one at: %s"), *otherLocation.ToString());
             closestDistanceSq = distanceSq;
-            compatibleConnectionComponent = otherConnection;
+            compatibleConnectionComponent = candidateConnection;
         }
     }
 
@@ -562,7 +627,22 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         return;
     }
 
-    connectionComponent->SetConnection(compatibleConnectionComponent);
+    auto connectionConveyor = Cast<AFGBuildableConveyorBase>(outerBuildable);
+    auto otherConnectionConveyor = Cast<AFGBuildableConveyorBase>(compatibleConnectionComponent->GetOuterBuildable());
+    if (connectionConveyor && otherConnectionConveyor)
+    {
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Removing, setting connection, and then re-adding conveyor so it will build the correct chain actor"));
+        auto buildableSybsystem = AFGBuildableSubsystem::Get(connectionComponent->GetWorld());
+        buildableSybsystem->RemoveConveyor(connectionConveyor);
+        connectionComponent->SetConnection(compatibleConnectionComponent);
+        buildableSybsystem->AddConveyor(connectionConveyor);
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Connecting the components!"));
+        connectionComponent->SetConnection(compatibleConnectionComponent);
+
+    }
 }
 
 void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent)
@@ -597,7 +677,7 @@ void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackCo
     {
         if (auto buildable = Cast<AFGBuildable>(actor))
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Examining buildable %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Examining hit result actor %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
             TInlineComponentArray<UFGRailroadTrackConnectionComponent*> openConnections;
             FindOpenRailroadConnections(openConnections, buildable);
 
