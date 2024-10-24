@@ -298,11 +298,7 @@ void FAutoLinkModule::AddIfOpen(TInlineComponentArray<UFGRailroadTrackConnection
         return;
     }
 
-    if (connection->IsConnected())
-    {
-        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGRailroadTrackConnectionComponent %s (%s) is already connected to %s"), *connection->GetName(), *connection->GetClass()->GetName(), *connection->GetConnection()->GetName());
-        return;
-    }
+    // Railroads can have multiple connections, so they're always "open"
 
     openConnections.Add(connection);
 }
@@ -641,25 +637,18 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
     {
         AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Connecting the components!"));
         connectionComponent->SetConnection(compatibleConnectionComponent);
-
     }
 }
 
 void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent)
 {
-    if (connectionComponent->IsConnected())
-    {
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Exiting because the connection component is already connected"));
-        return;
-    }
-
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
     auto searchStart = connectorLocation + (FVector::UpVector * 10);
     // Search a small extra distance straight out from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
     auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 10);
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s, searchStart is %s, searchEnd is at: %s"),
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s, searchStart is %s, searchEnd is %s"),
         *connectorLocation.ToString(),
         *searchStart.ToString(),
         *searchEnd.ToString());
@@ -692,52 +681,73 @@ void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackCo
         }
     }
 
-    for (auto otherConnection : candidates)
+    for (auto candidateConnection : candidates)
     {
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Examining connection: %s (%s) at %s (%f units away)"),
-            *otherConnection->GetName(),
-            *otherConnection->GetClass()->GetName(),
-            *otherConnection->GetConnectorLocation().ToString(),
-            FVector::Distance(connectorLocation, otherConnection->GetConnectorLocation()));
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Examining connection: %s on %s at %s (%f units away)"),
+            *candidateConnection->GetName(),
+            *candidateConnection->GetOwner()->GetName(),
+            *candidateConnection->GetConnectorLocation().ToString(),
+            FVector::Distance(connectorLocation, candidateConnection->GetConnectorLocation()));
 
-        if (!IsValid(otherConnection))
+        if (!IsValid(candidateConnection))
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tNot valid!"));
             continue;
         }
 
-        if (otherConnection->IsConnected())
+        auto alreadyConnectedToThis = false;
+        for (auto otherSubConnection : candidateConnection->GetConnections())
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tAlready connected!"));
+            if (connectionComponent == otherSubConnection)
+            {
+                alreadyConnectedToThis = true;
+                break;
+            }
+        }
+
+        if (alreadyConnectedToThis)
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tAlready connected to this!"));
+            continue;
+        }
+
+        const FVector candidateLocation = candidateConnection->GetConnectorLocation();
+        const FVector fromCandidateToConnectorVector = connectorLocation - candidateLocation; // This gives the vector from the candidate connector to the main connector
+        const float distanceSq = fromCandidateToConnectorVector.SquaredLength();
+        if (distanceSq > 1) // Anything more than a 1 cm away is too far (and most are even much closer, based on my tests)
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tCandidate connection is too far. Distance SQ: %f!"), distanceSq);
             continue;
         }
 
         const FVector connectorNormal = connectionComponent->GetConnectorNormal();
+        const FVector candidateConnectorNormal = candidateConnection->GetConnectorNormal();
 
         // Determine if the connections components are aligned
-        const FVector crossProduct = FVector::CrossProduct(connectorNormal, otherConnection->GetConnectorNormal());
-        auto isCollinear = crossProduct.IsNearlyZero(.01);
+        const FVector crossProduct = FVector::CrossProduct(connectorNormal, candidateConnectorNormal);
+        // We allow slightly unaligned normal vetors to account for curved rails.
+        auto isCollinear = FMath::IsNearlyZero(crossProduct.X, .01) && FMath::IsNearlyZero(crossProduct.Y, .01) && FMath::IsNearlyZero(crossProduct.Z, 1.0);
         if (!isCollinear)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tOther connection normal is not collinear with this connector normal! The parts are not aligned!"), );
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tCandidate connection normal is not collinear with this connector normal! The parts are not aligned! Cross product is %s"), *crossProduct.ToString());
             continue;
         }
 
-        // For belt connectors, we do dot product things to ensure they are facing each other because conveyor lifts can be further away,
-        // meaning they could also theoretically be on the wrong side (e.g. clipping through the factory). These have to be virtually touching
-        // for us to link them so we just make double sure of that here.
-        const FVector otherLocation = otherConnection->GetConnectorLocation();
-        const float distanceSq = FVector::DistSquared(otherLocation, connectorLocation);
-
-        if (distanceSq > 1) // Anything more than a 1 cm away is too far (and most are even much closer, based on my tests)
+        // Determine if both connectors are facing in opposite directions. If we don't do this check, the connectors might be facing in the same direction,
+        // particularly with rail junctions that overlap a lot. Because the floating point error on identical connector positions might make it look like
+        // facing rails are overlapping (see the belt dot product logic for explanation) and we've already verified they're the right distance apart, we
+        // can just ensure the dot products have opposite signs.
+        const double connectorNormalDotProduct = connectorNormal.Dot(fromCandidateToConnectorVector);
+        const double candidateNormalDotProduct = candidateConnectorNormal.Dot(fromCandidateToConnectorVector);
+        if (connectorNormalDotProduct > 0 == candidateNormalDotProduct > 0)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tConnection is too far away to be auto-linked!"), );
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tThe connectors are not facing in opposite directions! connectorDotVec: %f, candidateDotVec: %f"), connectorNormalDotProduct, candidateNormalDotProduct);
             continue;
         }
 
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close; taking it as the best result. Location: %s"), *otherLocation.ToString());
-        otherConnection->AddConnection(connectionComponent);
-        break;
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close; so we're linking it. Location: %s"), *candidateLocation.ToString());
+        connectionComponent->AddConnection(candidateConnection);
+        // We don't break here - keep linking because railroads can be connected to multiple other railoads at junctions.
     }
 
     AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: No compatible connection found"));
