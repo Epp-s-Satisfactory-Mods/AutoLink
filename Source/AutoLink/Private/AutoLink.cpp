@@ -34,7 +34,6 @@ DEFINE_LOG_CATEGORY(LogAutoLink)
 #define AL_LOG(Verbosity, Format, ...)
 #endif
 
-
 void FAutoLinkModule::StartupModule()
 {
     if (WITH_EDITOR)
@@ -645,21 +644,51 @@ void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackCo
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
     auto searchStart = connectorLocation + (FVector::UpVector * 10);
-    // Search a small extra distance straight out from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
-    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 10);
+    // Search a small extra distance from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
+    auto searchRadius = 10.0f;
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s, searchStart is %s, searchEnd is %s"),
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s, searchStart is %s, searchRadius is %f"),
         *connectorLocation.ToString(),
         *searchStart.ToString(),
-        *searchEnd.ToString());
+        searchRadius);
+
+    // Curved rails don't always seem to be hit by the normal linear hitscan out of the connector normal
+    // so we do a radius search here to be sure we're getting good candidates.
+    auto connectionOwner = connectionComponent->GetOwner();
+    TArray< FOverlapResult > overlapResults;
+    connectionComponent->GetWorld()->OverlapMultiByObjectType(
+        overlapResults,
+        searchStart,
+        FQuat::Identity,
+        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects),
+        FCollisionShape::MakeSphere(searchRadius));
 
     TArray< AActor* > hitActors;
-    HitScan(
-        hitActors,
-        connectionComponent->GetWorld(),
-        searchStart,
-        searchEnd,
-        connectionComponent->GetOwner());
+    for (const FOverlapResult& result : overlapResults)
+    {
+        auto actor = result.GetActor();
+        if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
+        {
+            if (auto manager = AAbstractInstanceManager::GetInstanceManager(actor))
+            {
+                FInstanceHandle handle;
+                if (manager->ResolveOverlap(result, handle))
+                {
+                    actor = handle.GetOwner();
+                }
+            }
+        }
+
+        if (actor == connectionOwner)
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: IGNORING connection owner %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
+            continue;
+        }
+
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Hit actor %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
+
+        hitActors.Add(actor);
+    }
 
     TArray< UFGRailroadTrackConnectionComponent* > candidates;
     for (auto actor : hitActors)
@@ -734,14 +763,13 @@ void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackCo
         }
 
         // Determine if both connectors are facing in opposite directions. If we don't do this check, the connectors might be facing in the same direction,
-        // particularly with rail junctions that overlap a lot. Because the floating point error on identical connector positions might make it look like
-        // facing rails are overlapping (see the belt dot product logic for explanation) and we've already verified they're the right distance apart, we
-        // can just ensure the dot products have opposite signs.
-        const double connectorNormalDotProduct = connectorNormal.Dot(fromCandidateToConnectorVector);
-        const double candidateNormalDotProduct = candidateConnectorNormal.Dot(fromCandidateToConnectorVector);
-        if (connectorNormalDotProduct > 0 == candidateNormalDotProduct > 0)
+        // particularly with rail junctions that overlap a lot.
+        // If a dot product is positive, then the vectors are less than 90 degrees apart.
+        // So this dot product should be negative, meaning the connector normal is pointing AGAINST the candidate normal vector
+        const double connectorDotProduct = connectorNormal.Dot(candidateConnectorNormal);
+        if (connectorDotProduct >= 0)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tThe connectors are not facing in opposite directions! connectorDotVec: %f, candidateDotVec: %f"), connectorNormalDotProduct, candidateNormalDotProduct);
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tThe connectors are not facing in opposite directions! connectorDotProduct: %.8f"), connectorDotProduct);
             continue;
         }
 
