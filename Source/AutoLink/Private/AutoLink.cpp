@@ -524,7 +524,7 @@ void FAutoLinkModule::FindOpenBeltConnections(TInlineComponentArray<UFGFactoryCo
     // Start with special cases where we know how to get the connections without a full scan
     if (auto conveyorBase = Cast<AFGBuildableConveyorBase>(buildable))
     {
-        AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildableConveyorBase"));
+        AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildableConveyorBase %s"), *conveyorBase->GetName());
         AddIfCandidate(openConnections, conveyorBase->GetConnection0());
         AddIfCandidate(openConnections, conveyorBase->GetConnection1());
     }
@@ -536,7 +536,7 @@ void FAutoLinkModule::FindOpenBeltConnections(TInlineComponentArray<UFGFactoryCo
     }
     else if (auto factory = Cast<AFGBuildableFactory>(buildable))
     {
-        AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildableFactory"));
+        AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildableFactory %s"), *factory->GetName());
         for (auto connectionComponent : factory->GetConnectionComponents())
         {
             AL_LOG(Verbose, TEXT("FindOpenBeltConnections:\tFound UFGFactoryConnectionComponent"));
@@ -550,7 +550,7 @@ void FAutoLinkModule::FindOpenBeltConnections(TInlineComponentArray<UFGFactoryCo
         buildable->GetComponents(factoryConnections);
         for (auto connectionComponent : factoryConnections)
         {
-            AL_LOG(Verbose, TEXT("FindOpenBeltConnections:\tFound UFGFactoryConnectionComponent"));
+            AL_LOG(Verbose, TEXT("FindOpenBeltConnections:\tFound UFGFactoryConnectionComponent %s"), *connectionComponent->GetName());
             AddIfCandidate(openConnections, connectionComponent);
         }
     }
@@ -602,14 +602,14 @@ void FAutoLinkModule::FindOpenFluidConnections(
     // Start with special cases where we know to get the connections without a full scan
     if (auto pipeline = Cast<AFGBuildablePipeline>(buildable))
     {
-        AL_LOG(Verbose, TEXT("FindOpenFluidConnections: AFGBuildablePipeline"));
+        AL_LOG(Verbose, TEXT("FindOpenFluidConnections: AFGBuildablePipeline %s"), *pipeline->GetName());
 
         AddIfCandidate(openConnections, pipeline->GetPipeConnection0(), pipeline);
         AddIfCandidate(openConnections, pipeline->GetPipeConnection1(), pipeline);
     }
     else if (auto fluidIntegrant = Cast<IFGFluidIntegrantInterface>(buildable))
     {
-        AL_LOG(Verbose, TEXT("FindOpenFluidConnections: IFGFluidIntegrantInterface"));
+        AL_LOG(Verbose, TEXT("FindOpenFluidConnections: IFGFluidIntegrantInterface %s"), *buildable->GetName());
         for (auto connection : fluidIntegrant->GetPipeConnections())
         {
             AddIfCandidate(openConnections, connection, fluidIntegrant);
@@ -665,7 +665,7 @@ void FAutoLinkModule::FindOpenHyperConnections(TInlineComponentArray<UFGPipeConn
     // Start with special cases where we know to get the connections without a full scan
     if (auto buildablePipe = Cast<AFGBuildablePipeHyper>(buildable))
     {
-        AL_LOG(Verbose, TEXT("FindOpenHyperConnections: AFGBuildablePipeHyper"));
+        AL_LOG(Verbose, TEXT("FindOpenHyperConnections: AFGBuildablePipeHyper %s"), *buildablePipe->GetName());
         AddIfCandidate(openConnections, Cast<UFGPipeConnectionComponentHyper>(buildablePipe->GetConnection0()));
         AddIfCandidate(openConnections, Cast<UFGPipeConnectionComponentHyper>(buildablePipe->GetConnection1()));
     }
@@ -700,7 +700,7 @@ void FAutoLinkModule::FindOpenRailroadConnections(TInlineComponentArray<UFGRailr
     // Start with special cases where we know to get the connections without a full scan
     if (auto railroad = Cast<AFGBuildableRailroadTrack>(buildable))
     {
-        AL_LOG(Verbose, TEXT("FindOpenRailroadConnections: AFGBuildableRailroadTrack"));
+        AL_LOG(Verbose, TEXT("FindOpenRailroadConnections: AFGBuildableRailroadTrack %s"), *railroad->GetName());
         AddIfCandidate(openConnections, railroad->GetConnection(0));
         AddIfCandidate(openConnections, railroad->GetConnection(1));
     }
@@ -1092,11 +1092,13 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
 
 void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent)
 {
+    // Note that we do NOT short-circuit if it's already connected because railroads can have multiple connections
+
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
     auto searchStart = connectorLocation + (FVector::UpVector * 10);
     // Search a small extra distance from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
-    auto searchRadius = 10.0f;
+    auto searchRadius = 20.0f;
 
     AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s"), *connectorLocation.ToString());
 
