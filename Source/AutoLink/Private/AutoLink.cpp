@@ -195,6 +195,31 @@ void FAutoLinkModule::DumpFluidIntegrant(FString prefix, IFGFluidIntegrantInterf
         DumpConnection(prefix, c);
     }
 }
+
+void FAutoLinkModule::DumpConnection(FString prefix, UFGPipeConnectionComponentHyper* c)
+{
+    if (!c)
+    {
+        AL_LOG(Verbose, TEXT("%s:\t UFGPipeConnectionComponentHyper is null"), *prefix);
+        return;
+    }
+    AL_LOG(Verbose, TEXT("%s:\t UFGPipeConnectionComponentHyper is %s at %x"), *prefix, *c->GetName(), c);
+
+    AL_LOG(Verbose, TEXT("%s:\t\t mDisallowSnappingTo: %d"), *prefix, c->mDisallowSnappingTo);
+    AL_LOG(Verbose, TEXT("%s:\t\t mPipeConnectionType: %d"), *prefix, c->mPipeConnectionType);
+    AL_LOG(Verbose, TEXT("%s:\t\t mConnectorClearance: %d"), *prefix, c->mConnectorClearance);
+
+    AL_LOG(Verbose, TEXT("%s:\t\t IsConnected: %d"), *prefix, c->IsConnected());
+    if (c->mConnectedComponent)
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mConnectedComponent: %s at %x"), *prefix, *c->mConnectedComponent->GetName(), c->mConnectedComponent);
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mConnectedComponent: null"), *prefix);
+    }
+}
+
 #endif //AL_DEBUGGING
 
 void FAutoLinkModule::StartupModule()
@@ -265,6 +290,14 @@ void FAutoLinkModule::StartupModule()
                     DumpConnection(TEXT("UFGBuildGunState::OnRecipeSampled"), connectionComponent);
                 }
             }
+
+            TInlineComponentArray<UFGPipeConnectionComponentHyper*> hyperConnections;
+            actor->GetComponents(hyperConnections);
+            for (auto connectionComponent : hyperConnections)
+            {
+                DumpConnection(TEXT("UFGBuildGunState::OnRecipeSampled"), connectionComponent);
+            }
+
             AL_LOG(Verbose, TEXT("UFGBuildGunState::OnRecipeSampled. Actor %s (%s) at %x dumped."), *actor->GetName(), *actor->GetClass()->GetName(), actor);
 
             scope(buildGunState, recipe);
@@ -540,6 +573,17 @@ void FAutoLinkModule::AddIfCandidate(
         return;
     }
 
+    switch (connection->GetPipeConnectionType())
+    {
+    case EPipeConnectionType::PCT_CONSUMER:
+    case EPipeConnectionType::PCT_PRODUCER:
+    case EPipeConnectionType::PCT_ANY:
+        break;
+    default:
+        AL_LOG(Verbose, TEXT("\tAddIfCandidate: UFGPipeConnectionComponent connection type is %d, which doesn't actually connect to entities in the world."), connection->GetPipeConnectionType());
+        return;
+    }
+
     if (!connection->HasFluidIntegrant())
     {
         AL_LOG(Verbose, TEXT("\tAddIfCandidate: UFGPipeConnectionComponent %s (%s) has no fluid integrant, so setting it to its owner"), *connection->GetName(), *connection->GetClass()->GetName());
@@ -599,6 +643,17 @@ void FAutoLinkModule::AddIfCandidate(TInlineComponentArray<UFGPipeConnectionComp
     if (connection->IsConnected())
     {
         AL_LOG(Verbose, TEXT("\tAddIfCandidate: UFGPipeConnectionComponentHyper %s (%s) is already connected to %s"), *connection->GetName(), *connection->GetClass()->GetName(), *connection->GetConnection()->GetName());
+        return;
+    }
+
+    switch (connection->GetPipeConnectionType())
+    {
+    case EPipeConnectionType::PCT_CONSUMER:
+    case EPipeConnectionType::PCT_PRODUCER:
+    case EPipeConnectionType::PCT_ANY:
+        break;
+    default:
+        AL_LOG(Verbose, TEXT("\tAddIfCandidate: UFGPipeConnectionComponentHyper connection type is %d, which doesn't actually connect to entities in the world."), connection->GetPipeConnectionType());
         return;
     }
 

@@ -26,6 +26,8 @@ public:
 
     static void DumpConnection(FString prefix, UFGPipeConnectionComponent* c);
     static void DumpFluidIntegrant(FString prefix, IFGFluidIntegrantInterface* p);
+
+    static void DumpConnection(FString prefix, UFGPipeConnectionComponentHyper* c);
 #endif
 
     virtual void StartupModule() override;
