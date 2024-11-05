@@ -5,8 +5,12 @@
 #include "FGBuildableConveyorBase.h"
 #include "FGBuildableConveyorBelt.h"
 #include "FGBuildableConveyorLift.h"
+#include "FGBuildableDecor.h"
+#include "FGBuildableFactoryBuilding.h"
 #include "FGBuildablePipeHyper.h"
 #include "FGBuildablePipeline.h"
+#include "FGBuildablePoleBase.h"
+#include "FGBuildablePowerPole.h"
 #include "FGBuildableRailroadTrack.h"
 #include "FGBuildableSubsystem.h"
 #include "FGFactoryConnectionComponent.h"
@@ -18,21 +22,98 @@
 #include "InstanceData.h"
 #include "Patching/NativeHookManager.h"
 
+#if AL_DEBUGGING
+#include "FGBuildGunBuild.h"
+#endif
+
 DEFINE_LOG_CATEGORY(LogAutoLink)
 
 // The mod template does this but we have no text to localize
 #define LOCTEXT_NAMESPACE "FAutoLinkModule"
 
-// When we're building to ship, set this to 0 to no-op logging and minimize performance impact. Would prefer to do this through
-// build defines based on whether we're building for development or shipping but at the moment alpakit always builds shipping.
-#define AL_LOG_DEBUG_TEXT 1
-
-#if AL_LOG_DEBUG_TEXT
+#if AL_DEBUGGING
 #define AL_LOG(Verbosity, Format, ...)\
     UE_LOG( LogAutoLink, Verbosity, Format, ##__VA_ARGS__ )
 #else
 #define AL_LOG(Verbosity, Format, ...)
 #endif
+
+#if AL_DEBUGGING
+void FAutoLinkModule::DumpConnection(FString prefix, UFGFactoryConnectionComponent* c)
+{
+    if (!c)
+    {
+        AL_LOG(Verbose, TEXT("%s:\t Connection is null"), *prefix);
+        return;
+    }
+    AL_LOG(Verbose, TEXT("%s:\t Connection is %s"), *prefix, *c->GetFName().GetPlainNameString());
+
+    AL_LOG(Verbose, TEXT("%s:\t\t mConnector: %d"), *prefix, c->mConnector);
+    AL_LOG(Verbose, TEXT("%s:\t\t mDirection: %d"), *prefix, c->mDirection);
+    AL_LOG(Verbose, TEXT("%s:\t\t mConnectorClearance: %f"), *prefix, c->mConnectorClearance);
+    if (c->mConnectedComponent)
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mConnectedComponent: %s on %s"), *prefix, *c->mConnectedComponent->GetFName().GetPlainNameString(), *c->mConnectedComponent->GetOuterBuildable()->GetName());
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mConnectedComponent: null"), *prefix);
+    }
+    AL_LOG(Verbose, TEXT("%s:\t\t mHasConnectedComponent: %d"), *prefix, c->mHasConnectedComponent);
+    if (c->mConnectionInventory)
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mConnectionInventory: %s"), *prefix, *c->mConnectionInventory->GetName());
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mConnectionInventory: null"), *prefix);
+    }
+    AL_LOG(Verbose, TEXT("%s:\t\t mInventoryAccessIndex: %d"), *prefix, c->mInventoryAccessIndex);
+    if (c->mOuterBuildable)
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mOuterBuildable: %s"), *prefix, *c->mOuterBuildable->GetName());
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("%s:\t\t mOuterBuildable: null"), *prefix);
+    }
+    AL_LOG(Verbose, TEXT("%s:\t\t mForwardPeekAndGrabToBuildable: %d"), *prefix, c->mForwardPeekAndGrabToBuildable);
+}
+
+void FAutoLinkModule::DumpConveyor(FString prefix, AFGBuildableConveyorBase* conveyor)
+{
+    if (!conveyor)
+    {
+        AL_LOG(Verbose, TEXT("%s: Conveyor is null"), *prefix);
+        return;
+    }
+
+    AL_LOG(Verbose, TEXT("%s: Conveyor is %s"), *prefix, *conveyor->GetName());
+    auto ownerChainActor = conveyor->GetConveyorChainActor();
+    if (ownerChainActor)
+    {
+        AL_LOG(Verbose, TEXT("%s: Chain actor: %s"), *prefix, *ownerChainActor->GetName());
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("%s: Chain actor: null"), *prefix);
+    }
+    AL_LOG(Verbose, TEXT("%s: Chain segment index: %d"), *prefix, conveyor->mChainSegmentIndex);
+    AL_LOG(Verbose, TEXT("%s: Chain flags: %d"), *prefix, conveyor->GetConveyorChainFlags());
+    auto nextTickConveyor = conveyor->GetNextTickConveyor();
+    if (nextTickConveyor)
+    {
+        AL_LOG(Verbose, TEXT("%s: Next tick conveyor: %s"), *prefix, *nextTickConveyor->GetName());
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("%s: Next tick conveyor: null"), *prefix);
+    }
+
+    DumpConnection(prefix, conveyor->GetConnection0());
+    DumpConnection(prefix, conveyor->GetConnection1());
+}
+#endif //AL_DEBUGGING
 
 void FAutoLinkModule::StartupModule()
 {
@@ -43,6 +124,47 @@ void FAutoLinkModule::StartupModule()
     }
 
     AL_LOG(Verbose, TEXT("StartupModule: Hooking Functions..."));
+
+#if AL_DEBUGGING
+    SUBSCRIBE_METHOD(
+        UFGBuildGunState::OnRecipeSampled,
+        [](auto& scope, UFGBuildGunState* buildGunState, TSubclassOf<class UFGRecipe> recipe)
+        {
+            // Resolve the actor at the hit result
+            auto buildGun = buildGunState->GetBuildGun();
+            auto& hitResult = buildGun->GetHitResult();
+            auto actor = hitResult.GetActor();
+            if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
+            {
+                if (auto manager = AAbstractInstanceManager::GetInstanceManager(actor))
+                {
+                    FInstanceHandle handle;
+                    if (manager->ResolveHit(hitResult, handle))
+                    {
+                        actor = handle.GetOwner();
+                    }
+                }
+            }
+
+            AL_LOG(Verbose, TEXT("UFGBuildGunState::OnRecipeSampled. Actor is %s (%s)."), *actor->GetName(), *actor->GetClass()->GetName());
+
+            if (auto connectionOwner = Cast<AFGBuildableConveyorBase>(actor))
+            {
+                DumpConveyor(TEXT("UFGBuildGunState::OnRecipeSampled"), connectionOwner);
+            }
+            else
+            {
+                TInlineComponentArray<UFGFactoryConnectionComponent*> factoryConnections;
+                actor->GetComponents(factoryConnections);
+                for (auto connectionComponent : factoryConnections)
+                {
+                    DumpConnection(TEXT("UFGBuildGunState::OnRecipeSampled"), connectionComponent);
+                }
+            }
+
+            scope(buildGunState, recipe);
+        });
+#endif
 
     SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBlueprintHologram::Construct, GetMutableDefault<AFGBlueprintHologram>(),
         [](AActor* returnValue, AFGBlueprintHologram* hologram, TArray< AActor* >& out_children, FNetConstructionID NetConstructionID)
@@ -76,8 +198,59 @@ void FAutoLinkModule::StartupModule()
         });
 }
 
+bool FAutoLinkModule::ShouldTryToAutoLink(AFGBuildable* buildable)
+{
+    // This function exists for performace, so we can short-circuit when objects will never have relevant connections.
+    // This saves us from having to scan all the components on every object built. This doesn't matter much for individual
+    // buildings but big blueprints can have a lot of objects that all get scanned in one frame. In testing, I built
+    // some oversized blueprint rails with lots of foundations that definitely dropped the framerate significantly for
+    // a beat and anything we can do to help alleviate the hit of big blueprints is gonna be a win in the cases that
+    // users will notice.
+
+    // This function was created by manually poking around the header files and trying to target the things that are
+    // obviously not connectable and are built often or I suspect are likely to be used in blueprints. Note that we don't
+    // link electricity since it's not something that can be auto-linked without core gameplay changes like building wires
+    // for users, so when we it meets the above criteria and we are sure it doesn't have a conveyor, pipeline, hypertube,
+    // or railroad connection, we will not attempt to auto-link.
+
+    // Note that things like blueprint designers are intentionally omitted from these checks; even if they don't have
+    // connections, they are very rarely constructed and so adding a check here that every buildable will have to do is
+    // likely a poor tradeoff - we can eat the components scan a few times per game on designers to avoid an extra type
+    // check in every single conveyor built, for example.
+
+    // ...I wrote all that and then iterated until there are only a few things below, but if you have suggestions, let me
+    // know on GitHub.
+
+    // Base class for inert things like foundations, walls, etc
+    if (buildable->IsA<AFGBuildableFactoryBuilding>())
+    {
+        return false;
+    }
+
+    // Conveyor and pipe supports
+    if (buildable->IsA<AFGBuildablePoleBase>())
+    {
+        return false;
+    }
+
+    // All power poles
+    if (buildable->IsA<AFGBuildablePowerPole>())
+    {
+        return false;
+    }
+
+    // If we don't know for certain, then we assume we have to scan it
+    return true;
+}
+
 void FAutoLinkModule::FindAndLinkForBuildable(AFGBuildable* buildable)
 {
+    if (!ShouldTryToAutoLink(buildable))
+    {
+        AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Buildable %s of type %s is not linkable!"), *buildable->GetName(), *buildable->GetClass()->GetName());
+        return;
+    }
+
     AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Buildable is %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
 
     // Belt connections
@@ -166,12 +339,18 @@ void FAutoLinkModule::AddIfOpen(TInlineComponentArray<UFGFactoryConnectionCompon
 
 void FAutoLinkModule::FindOpenBeltConnections(TInlineComponentArray<UFGFactoryConnectionComponent*>& openConnections, AFGBuildable* buildable)
 {
-    // Start with special cases where we know to get the connections without a full scan
+    // Start with special cases where we know how to get the connections without a full scan
     if (auto conveyorBase = Cast<AFGBuildableConveyorBase>(buildable))
     {
         AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildableConveyorBase"));
         AddIfOpen(openConnections, conveyorBase->GetConnection0());
         AddIfOpen(openConnections, conveyorBase->GetConnection1());
+    }
+    else if (auto conveyorPole = Cast<AFGBuildablePoleBase>(buildable))
+    {
+        AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildablePoleBase so skipping"));
+        // Don't try to link to/from conveyor poles. They're cosmetic and we don't need to do the extra scanning work.
+        return;
     }
     // For whatever reason, AFGBuildableFactory::GetConnectionComponents can return null connections and none of the actual connections,
     // so it falls into the default searching case here
@@ -207,6 +386,8 @@ void FAutoLinkModule::AddIfOpen(
 
     if (!connection->HasFluidIntegrant())
     {
+        // This often isn't set when it it logically should be. Tests haven't shown any harm in setting it and
+        // this passes it up to the caller so it can do fluid integrant management if something needs to be linked.
         connection->SetFluidIntegrant(owningFluidIntegrant);
     }
 
@@ -380,7 +561,9 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
     case EFactoryConnectionDirection::FCD_OUTPUT:
         break;
     default:
-        // Don't know what to do with EFactoryConnectionDirection::FCD_ANY or other values and I suspect they're not necessary. Can come back and handle them later if that's wrong.
+        // EFactoryConnectionDirection::FCD_SNAP_ONLY is apparently used for conveyor poles and we don't need to link those since they're cosmetic.
+        // EFactoryConnectionDirection::FCD_ANY or others, I don't know where they'd be used and I suspect they're unnecessary. Can come back and
+        // handle them later if that's wrong.
         AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Exiting because the connection direction is: %d"), connectionDirection);
         return;
     }
@@ -559,9 +742,9 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
             }
         }
 
-        const FVector otherLocation = candidateConnection->GetConnectorLocation();
-        const FVector fromOtherToConnectorVector = connectorLocation - otherLocation; // This gives the vector from the other connection to the main connector
-        const float distanceSq = fromOtherToConnectorVector.SquaredLength();
+        const FVector candidateLocation = candidateConnection->GetConnectorLocation();
+        const FVector fromCandidateToConnectorVector = connectorLocation - candidateLocation; // This gives the vector from the candidate connection to the main connector
+        const float distanceSq = fromCandidateToConnectorVector.SquaredLength();
         const float minDistanceSq = minConnectorDistance == 0.0f ? 0.0f : ((minConnectorDistance * minConnectorDistance) - 1); // Give a little padding for floating points
         const float maxDistanceSq = (maxConnectorDistance * maxConnectorDistance) + 1; // A little padding for floating points
         AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tMin Distance: %f, Max Distance: %f, Distance: %f!"), minConnectorDistance, maxConnectorDistance, FMath::Sqrt( distanceSq ) );
@@ -572,10 +755,10 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         }
 
         const FVector connectorNormal = connectionComponent->GetConnectorNormal();
-        const FVector otherConnectorNormal = candidateConnection->GetConnectorNormal();
+        const FVector candidateConnectorNormal = candidateConnection->GetConnectorNormal();
 
         // Determine if the connection components are aligned. If the cross product is 0, they are on the same line
-        const FVector crossProduct = FVector::CrossProduct(connectorNormal, otherConnectorNormal);
+        const FVector crossProduct = FVector::CrossProduct(connectorNormal, candidateConnectorNormal);
         auto isCollinear = crossProduct.IsNearlyZero(.01);
         if (!isCollinear)
         {
@@ -583,34 +766,46 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
             continue;
         }
 
-        // If we're within 1 cm, then we can just take this one as the best one. This isn't possible with conveyor lifts but is with belt. There could be multiple this
-        // close but that's extremely rare and just choosing one seems fine.
-        // This prevents the dot product math below, plus avoids some cases where things are barely overlapping and giving false dot product negatives.
         if (distanceSq < 1)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound one that's less than 1 cm away; take it as the best result. Location: %s"), *otherLocation.ToString());
+            // If we're within 1 cm and they're collinear, this is a belt-to-something connection that's the ideal distance.
+            // Now we just need to make sure they're facing each other so we know they're not overlapping in the same direction.
+
+            // If a dot product is positive, then the vectors are less than 90 degrees apart.
+            // So this dot product should be negative, meaning the connector normal is pointing AGAINST the candidate normal vector
+            const double connectorDotProduct = connectorNormal.Dot(candidateConnectorNormal);
+            if (connectorDotProduct >= 0)
+            {
+                AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tThe connectors are not facing in opposite directions! connectorDotProduct: %.8f"), connectorDotProduct);
+                continue;
+            }
+
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound one that's less than 1 cm away; take it as the best result. Location: %s"), *candidateLocation.ToString());
             closestDistanceSq = distanceSq;
             compatibleConnectionComponent = candidateConnection;
             break;
         }
 
-        // Determine if both connectors are in front of each other (meaning they're facing each other).
-        // If we don't do this check, the connectors might be facing away or overlapping but past each other.
+        // We're further than 1 cm but within an allowed distance (i.e. this is two conveyor lifts that are lined up nicely).
+        // Determine if both connectors are in front of each other (meaning they're facing in opposite directions). If we don't do
+        // this check, the connectors might be facing away or overlapping but past each other; this latter case is why we check the
+        // normal vectors against the vector linking the two connectors.  If we just did their normal vectors, they could be on the
+        // wrong sides of each other and still give a "facing in opposite directions" result.
         // 
         // If a dot product is positive, then the vectors are less than 90 degrees apart.
         // So this dot product should be negative, meaning the connector normal is pointing AGAINST the vector from the candidate to the connector
-        const double connectorNormalDotProduct = connectorNormal.Dot(fromOtherToConnectorVector);
-        // And this dot product should be positive, meaning the other connector normal is pointing WITH the vector from the candidate to the connector
-        const double otherNormalDotProduct = otherConnectorNormal.Dot(fromOtherToConnectorVector);
-        if (connectorNormalDotProduct > 0 || otherNormalDotProduct < 0)
+        const double connectorNormalDotProduct = connectorNormal.Dot(fromCandidateToConnectorVector);
+        // And this dot product should be positive, meaning the candidate connector normal is pointing WITH the vector from the candidate to the connector
+        const double candidateNormalDotProduct = candidateConnectorNormal.Dot(fromCandidateToConnectorVector);
+        if (connectorNormalDotProduct > 0 || candidateNormalDotProduct < 0)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tThe connectors are not each facing each other! connectorDotVec: %f, otherDotVec: %f"), connectorNormalDotProduct, otherNormalDotProduct);
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tThe connectors are not each facing each other! connectorDotVec: %f, candidateDotVec: %f"), connectorNormalDotProduct, candidateNormalDotProduct);
             continue;
         }
 
         if (distanceSq < closestDistanceSq)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound a new closest one at: %s"), *otherLocation.ToString());
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound a new closest one at: %s"), *candidateLocation.ToString());
             closestDistanceSq = distanceSq;
             compatibleConnectionComponent = candidateConnection;
         }
@@ -934,7 +1129,6 @@ bool FAutoLinkModule::ConnectBestPipeCandidate(UFGPipeConnectionComponentBase* c
 }
 
 #undef AL_LOG
-#undef AL_LOG_DEBUG_TEXT
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_GAME_MODULE(FAutoLinkModule, AutoLink)
