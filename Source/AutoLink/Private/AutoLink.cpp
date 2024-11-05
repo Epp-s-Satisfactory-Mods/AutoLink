@@ -1,16 +1,20 @@
 #include "AutoLink.h"
 
 #include "AbstractInstanceManager.h"
-#include "Buildables/FGBuildableConveyorAttachment.h"
+#include "FGBlueprintHologram.h"
 #include "FGBuildableConveyorBase.h"
 #include "FGBuildableConveyorLift.h"
+#include "FGBuildablePipeHyper.h"
+#include "FGBuildablePipeline.h"
+#include "FGBuildableRailroadTrack.h"
 #include "FGFactoryConnectionComponent.h"
 #include "FGFluidIntegrantInterface.h"
 #include "FGPipeConnectionComponent.h"
 #include "FGPipeConnectionFactory.h"
 #include "FGPipeSubsystem.h"
-#include "Hologram/FGConveyorAttachmentHologram.h"
+#include "FGRailroadTrackConnectionComponent.h"
 #include "Hologram/FGBuildableHologram.h"
+#include "Hologram/FGConveyorAttachmentHologram.h"
 #include "InstanceData.h"
 #include "Patching/NativeHookManager.h"
 
@@ -38,50 +42,330 @@ void FAutoLinkModule::StartupModule()
         return;
     }
 
-    AL_LOG(Verbose, TEXT("StartupModule: Hooking ConfigureComponents..."));
+    AL_LOG(Verbose, TEXT("StartupModule: Hooking Functions..."));
 
-    auto defaultBuildableHologram = GetMutableDefault<AFGBuildableHologram>();
-    SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBuildableHologram::ConfigureComponents, defaultBuildableHologram, FAutoLinkModule::ConfigureComponentsHook);
+    SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBlueprintHologram::Construct, GetMutableDefault<AFGBlueprintHologram>(),
+        [](AActor* returnValue, AFGBlueprintHologram* hologram, TArray< AActor* >& out_children, FNetConstructionID NetConstructionID)
+        {
+            AL_LOG(Verbose, TEXT("AFGBlueprintHologram::Construct: The hologram is %s"), *hologram->GetName());
+
+            for (auto child : out_children)
+            {
+                AL_LOG(Verbose, TEXT("AFGBlueprintHologram::Construct: Child %s (%s) at %s"),
+                    *child->GetName(),
+                    *child->GetClass()->GetName(),
+                    *child->GetActorLocation().ToString());
+
+                if (auto buildable = Cast<AFGBuildable>(child))
+                {
+                    FindAndLinkForBuildable(buildable);
+                }
+            }
+
+            AL_LOG(Verbose, TEXT("AFGBlueprintHologram::Construct: Return value %s (%s) at %s"),
+                *returnValue->GetName(),
+                *returnValue->GetClass()->GetName(),
+                *returnValue->GetActorLocation().ToString());
+        });
+
+    SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBuildableHologram::ConfigureComponents, GetMutableDefault<AFGBuildableHologram>(),
+        [](const AFGBuildableHologram* buildableHologram, AFGBuildable* buildable)
+        {
+            AL_LOG(Verbose, TEXT("ConfigureComponentsHook: The hologram is %s and buildable is %s at %s"), *buildableHologram->GetName(), *buildable->GetName(), *buildable->GetActorLocation().ToString());
+            FindAndLinkForBuildable(buildable);
+        });
 }
 
-void FAutoLinkModule::ConfigureComponentsHook(const AFGBuildableHologram* buildableHologram, AFGBuildable* buildable)
+void FAutoLinkModule::FindAndLinkForBuildable(AFGBuildable* buildable)
 {
-    AL_LOG(Verbose, TEXT("ConfigureComponentsHook: The hologram is %s and buildable is %s at %s"), *buildableHologram->GetName(), *buildable->GetName(), *buildable->GetActorLocation().ToString() );
-
-    if (auto buildableConveyorAttachment = Cast<AFGBuildableConveyorAttachment>(buildable))
+    AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Buildable is %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
+    
+    // Belt connections
     {
-        AL_LOG(Verbose, TEXT("ConfigureComponentsHook: It's a buildable conveyor attachment."));
-        TInlineComponentArray<UFGFactoryConnectionComponent*> connectionComponents;
-        buildableConveyorAttachment->GetComponents(connectionComponents);
-        for (auto connectionComponent : connectionComponents)
+        TInlineComponentArray<UFGFactoryConnectionComponent*> openConnections;
+        FindOpenBeltConnections(openConnections, buildable);
+        AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Found %d open belt connections"), openConnections.Num());
+        for (auto connection : openConnections)
         {
-            AL_LOG(Verbose, TEXT("ConfigureComponentsHook: Examining input connection component: %s"), *connectionComponent->GetName());
-            FAutoLinkModule::FindAndLinkCompatibleBeltConnection(connectionComponent);
+            FindAndLinkCompatibleBeltConnection(connection);
         }
     }
-    else if (auto buildableFactory = Cast<AFGBuildableFactory>(buildable))
+
+    // Railroad connections
     {
-        AL_LOG(Verbose, TEXT("ConfigureComponentsHook: It's a buildable factory."));
-
-        for (auto component : buildableFactory->GetComponents())
+        TInlineComponentArray<UFGRailroadTrackConnectionComponent*> openConnections;
+        FindOpenRailroadConnections(openConnections, buildable);
+        AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Found %d open railroad connections"), openConnections.Num());
+        for (auto connection : openConnections)
         {
-            AL_LOG(Verbose, TEXT("ConfigureComponentsHook: Component: %s of type %s"), *component->GetName(), *component->GetClass()->GetFullName());
+            FindAndLinkCompatibleRailroadConnection(connection);
+        }
+    }
 
-            if (auto connectionComponent = Cast<UFGFactoryConnectionComponent>(component))
+    // Pipe connections
+    {
+        TInlineComponentArray<UFGPipeConnectionComponent*> openConnections;
+        FindOpenFluidConnections(openConnections, buildable);
+        AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Found %d open fluid connections"), openConnections.Num());
+        TSet< IFGFluidIntegrantInterface* > integrantsToRegister;
+        for (auto connection : openConnections)
+        {
+            if (FindAndLinkCompatibleFluidConnection(connection))
             {
-                AL_LOG(Verbose, TEXT("\tConfigureComponentsHook: It's a UFGFactoryConnectionComponent"));
-                FAutoLinkModule::FindAndLinkCompatibleBeltConnection(connectionComponent);
-            }
-            else if (auto fluidIntegrant = Cast<IFGFluidIntegrantInterface>(component))
-            {
-                AL_LOG(Verbose, TEXT("\tConfigureComponentsHook: It's a IFGFluidIntegrantInterface."));
-                for (auto pipeConnection : fluidIntegrant->GetPipeConnections())
+                if (connection->HasFluidIntegrant())
                 {
-                    AL_LOG(Verbose, TEXT("\t\tConfigureComponentsHook: Has pipe connection: %s"),*pipeConnection->GetName());
-                    FAutoLinkModule::FindAndLinkCompatiblePipeConnection(pipeConnection, fluidIntegrant );
+                    AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Connection %s (%s) has a fluid integrant"), *connection->GetName(), *connection->GetClass()->GetName());
+                    integrantsToRegister.Add(connection->GetFluidIntegrant());
+                }
+                else
+                {
+                    AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Connection %s (%s) has NO fluid integrant"), *connection->GetName(), *connection->GetClass()->GetName());
                 }
             }
         }
+
+        if (integrantsToRegister.Num() > 0)
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Found connections have a total of %d integrants to register"), integrantsToRegister.Num());
+            auto pipeSubsystem = AFGPipeSubsystem::GetPipeSubsystem(buildable->GetWorld());
+            for (auto integrant : integrantsToRegister)
+            {
+                pipeSubsystem->RegisterFluidIntegrant(integrant);
+            }
+        }
+    }
+
+    // Hypertube connections
+    {
+        TInlineComponentArray<UFGPipeConnectionComponentHyper*> openConnections;
+        FindOpenHyperConnections(openConnections, buildable);
+        AL_LOG(Verbose, TEXT("FindAndLinkForBuildable: Found %d open hyper connections"), openConnections.Num());
+        for (auto connection : openConnections)
+        {
+            FindAndLinkCompatibleHyperConnection(connection);
+        }
+    }
+}
+
+void FAutoLinkModule::AddIfOpen(TInlineComponentArray<UFGFactoryConnectionComponent*>& openConnections, UFGFactoryConnectionComponent* connection)
+{
+    if (!connection)
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGFactoryConnectionComponent is null"));
+        return;
+    }
+
+    if (connection->IsConnected())
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGFactoryConnectionComponent %s (%s) is already connected to %s"), *connection->GetName(), *connection->GetClass()->GetName(), *connection->GetConnection()->GetName());
+        return;
+    }
+
+    openConnections.Add(connection);
+}
+
+void FAutoLinkModule::FindOpenBeltConnections(TInlineComponentArray<UFGFactoryConnectionComponent*>& openConnections, AFGBuildable* buildable)
+{
+    // Start with special cases where we know to get the connections without a full scan
+    if (auto conveyorBase = Cast<AFGBuildableConveyorBase>(buildable))
+    {
+        AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildableConveyorBase"));
+        AddIfOpen(openConnections, conveyorBase->GetConnection0());
+        AddIfOpen(openConnections, conveyorBase->GetConnection1());
+    }
+    // For whatever reason, AFGBuildableFactory::GetConnectionComponents can return null connections and none of the actual connections,
+    // so it falls into the default searching case here
+    else
+    {
+        AL_LOG(Verbose, TEXT("FindOpenBeltConnections: AFGBuildable is %s (%s)"), *buildable->GetName(), *buildable->GetClass()->GetName());
+        TInlineComponentArray<UFGFactoryConnectionComponent*> factoryConnections;
+        buildable->GetComponents(factoryConnections);
+        for (auto connectionComponent : factoryConnections)
+        {
+            AL_LOG(Verbose, TEXT("\tFindOpenBeltConnections: Found UFGFactoryConnectionComponent"));
+            AddIfOpen(openConnections, connectionComponent);
+        }
+    }
+}
+
+void FAutoLinkModule::AddIfOpen(
+    TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
+    UFGPipeConnectionComponent* connection,
+    IFGFluidIntegrantInterface* owningFluidIntegrant)
+{
+    if (!connection)
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGPipeConnectionComponent is null"));
+        return;
+    }
+
+    if (connection->IsConnected())
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGPipeConnectionComponent %s (%s) is already connected to %s"), *connection->GetName(), *connection->GetClass()->GetName(), *connection->GetConnection()->GetName());
+        return;
+    }
+
+    if (!connection->HasFluidIntegrant())
+    {
+        connection->SetFluidIntegrant(owningFluidIntegrant);
+    }
+
+    openConnections.Add(connection);
+}
+
+void FAutoLinkModule::FindOpenFluidConnections(
+    TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
+    AFGBuildable* buildable )
+{
+    // Start with special cases where we know to get the connections without a full scan
+    if (auto pipeline = Cast<AFGBuildablePipeline>(buildable))
+    {
+        AL_LOG(Verbose, TEXT("FindOpenFluidConnections: AFGBuildablePipeline"));
+
+        AddIfOpen(openConnections, pipeline->GetPipeConnection0(), pipeline);
+        AddIfOpen(openConnections, pipeline->GetPipeConnection1(), pipeline);
+    }
+    else if (auto fluidIntegrant = Cast<IFGFluidIntegrantInterface>(buildable))
+    {
+        AL_LOG(Verbose, TEXT("FindOpenFluidConnections: IFGFluidIntegrantInterface"));
+        for (auto connection : fluidIntegrant->GetPipeConnections())
+        {
+            AddIfOpen(openConnections, connection, fluidIntegrant);
+        }
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("FindOpenFluidConnections: AFGBuildable is %s (%s)"), *buildable->GetName(), *buildable->GetClass()->GetName());
+        for (auto component : buildable->GetComponents())
+        {
+            if (auto integrant = Cast<IFGFluidIntegrantInterface>(component))
+            {
+                AL_LOG(Verbose, TEXT("FindOpenFluidConnections:\tHas an IFGFluidIntegrantInterface component %s of type %s"), *component->GetName(), *component->GetClass()->GetName());
+                for (auto connection : integrant->GetPipeConnections())
+                {
+                    AddIfOpen(openConnections, connection, integrant);
+                }
+            }
+        }
+    }
+}
+
+void FAutoLinkModule::AddIfOpen(TInlineComponentArray<UFGPipeConnectionComponentHyper*>& openConnections, UFGPipeConnectionComponentHyper* connection)
+{
+    if (!connection)
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGPipeConnectionComponentHyper is null"));
+        return;
+    }
+
+    if (connection->IsConnected())
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGPipeConnectionComponentHyper %s (%s) is already connected to %s"), *connection->GetName(), *connection->GetClass()->GetName(), *connection->GetConnection()->GetName());
+        return;
+    }
+
+    openConnections.Add(connection);
+}
+
+void FAutoLinkModule::FindOpenHyperConnections(TInlineComponentArray<UFGPipeConnectionComponentHyper*>& openConnections, AFGBuildable* buildable)
+{
+    // Start with special cases where we know to get the connections without a full scan
+    if (auto buildablePipe = Cast<AFGBuildablePipeHyper>(buildable))
+    {
+        AL_LOG(Verbose, TEXT("FindOpenHyperConnections: AFGBuildablePipeHyper"));
+        AddIfOpen(openConnections, Cast<UFGPipeConnectionComponentHyper>(buildablePipe->GetConnection0()));
+        AddIfOpen(openConnections, Cast<UFGPipeConnectionComponentHyper>(buildablePipe->GetConnection1()));
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("FindOpenHyperConnections: AFGBuildable is %s (%s)"), *buildable->GetName(), *buildable->GetClass()->GetName());
+        TInlineComponentArray<UFGPipeConnectionComponentHyper*> connections;
+        buildable->GetComponents(connections);
+        for (auto connectionComponent : connections)
+        {
+            AL_LOG(Verbose, TEXT("\tFindOpenHyperConnections: Found UFGPipeConnectionComponentHyper"));
+            AddIfOpen(openConnections, connectionComponent);
+        }
+    }
+}
+
+void FAutoLinkModule::AddIfOpen(TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections, UFGRailroadTrackConnectionComponent* connection)
+{
+    if (!connection)
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGRailroadTrackConnectionComponent is null"));
+        return;
+    }
+
+    if (connection->IsConnected())
+    {
+        AL_LOG(Verbose, TEXT("\tAddIfOpen: UFGRailroadTrackConnectionComponent %s (%s) is already connected to %s"), *connection->GetName(), *connection->GetClass()->GetName(), *connection->GetConnection()->GetName());
+        return;
+    }
+
+    openConnections.Add(connection);
+}
+
+void FAutoLinkModule::FindOpenRailroadConnections(TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections, AFGBuildable* buildable)
+{
+    // Start with special cases where we know to get the connections without a full scan
+    if (auto railroad = Cast<AFGBuildableRailroadTrack>(buildable))
+    {
+        AL_LOG(Verbose, TEXT("FindOpenRailroadConnections: AFGBuildableRailroadTrack"));
+        AddIfOpen(openConnections, railroad->GetConnection(0));
+        AddIfOpen(openConnections, railroad->GetConnection(1));
+    }
+    else
+    {
+        AL_LOG(Verbose, TEXT("FindOpenRailroadConnections: AFGBuildable is %s (%s)"), *buildable->GetName(), *buildable->GetClass()->GetName());
+        TInlineComponentArray<UFGRailroadTrackConnectionComponent*> connections;
+        buildable->GetComponents(connections);
+        for (auto connectionComponent : connections)
+        {
+            AL_LOG(Verbose, TEXT("\tFindOpenRailroadConnections: Found UFGRailroadTrackConnectionComponent"));
+            AddIfOpen(openConnections, connectionComponent);
+        }
+    }
+}
+
+void FAutoLinkModule::HitScan(
+    TArray<AActor*>& actors,
+    UWorld* world,
+    FVector scanStart,
+    FVector scanEnd,
+    AActor* ignoreActor )
+{
+    TArray< FHitResult > hitResults;
+    world->LineTraceMultiByObjectType(
+        hitResults,
+        scanStart,
+        scanEnd,
+        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects));
+
+    for (const FHitResult& result : hitResults)
+    {
+        auto actor = result.GetActor();
+        if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
+        {
+            if (auto manager = AAbstractInstanceManager::GetInstanceManager(actor))
+            {
+                FInstanceHandle handle;
+                if (manager->ResolveHit(result, handle))
+                {
+                    actor = handle.GetOwner();
+                }
+            }
+        }
+
+        if (actor == ignoreActor)
+        {
+            AL_LOG(Verbose, TEXT("HitScan: Per ignoreActor, IGNORING hit actor %s of type %s at %s"), *actor->GetName(), *actor->GetClass()->GetName(), *result.Location.ToString());
+            continue;
+        }
+
+        AL_LOG(Verbose, TEXT("HitScan: Hit actor %s of type %s at %s"), *actor->GetName(), *actor->GetClass()->GetName(), *result.Location.ToString());
+
+        actors.Add(actor);
     }
 }
 
@@ -111,36 +395,25 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
     const float MAX_FACTORY_CONNECTOR_SEARCH_DISTANCE = 301.0f; // One more than the furthest away a compatible connector can be (in this case, a conveyor lift)
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * MAX_FACTORY_CONNECTOR_SEARCH_DISTANCE);
-    auto world = connectionComponent->GetWorld();
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: connector at: %s, searchEnd is at: %s, connectorLocation+normal: %s"), *connectorLocation.ToString(), *searchEnd.ToString(), *(connectorLocation + connectionComponent->GetConnectorNormal()).ToString());
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Connector at: %s, searchEnd is at: %s, direction is: %d"), *connectorLocation.ToString(), *searchEnd.ToString(), connectionDirection);
 
-    TArray< FHitResult > hitResults;
-    world->LineTraceMultiByObjectType(
-        hitResults,
+    TArray< AActor* > hitActors;
+    HitScan(
+        hitActors,
+        connectionComponent->GetWorld(),
         connectorLocation,
         searchEnd,
-        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects));
+        connectionComponent->GetOwner());
 
-    TArray< FactoryConnectionCandidate > candidates;
-    for (const FHitResult& result : hitResults)
+    // 12 is a random guess of the max possible candidates we could reasonably see
+    TArray<FactoryConnectionCandidate, TInlineAllocator<12>> candidates;
+    for (auto actor : hitActors)
     {
-        AActor* actor = result.GetActor();
-        if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
-        {
-            if (auto manager = AAbstractInstanceManager::GetInstanceManager(actor))
-            {
-                FInstanceHandle handle;
-                if (manager->ResolveHit(result, handle))
-                {
-                    actor = handle.GetOwner();
-                }
-            }
-        }
-
-        // We only find and register conveyors as possible candidates, but conveyor belts and conveyor lifts are each a little different
         if (auto buildableConveyor = Cast<AFGBuildableConveyorBase>(actor))
         {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining buildable conveyor base %s of type %s"), *buildableConveyor->GetName(), *buildableConveyor->GetClass()->GetName());
+            // Conveyor belts or conveyor lift
             const float CONVEYOR_LIFT_MIN_DISTANCE = 100.f;
             auto minConnectorDistance = 0.0f; // Conveyor lifts have some natural clearance
             auto maxConnectorDistance = 0.0f; // Conveyor belts have to be touching the connector; if it's a conveyor lift, we'll change this accordingly in a bit
@@ -153,22 +426,37 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
                 {
                     minConnectorDistance = CONVEYOR_LIFT_MIN_DISTANCE;
                     maxConnectorDistance =
-                        buildableConveyor->mConnection1->GetConnectorClearance() + // mConnection1 is always the output connection
+                        buildableConveyor->GetConnection1()->GetConnectorClearance() + // Connection1 is always the output connection
                         conveyorLift->mOpposingConnectionClearance[1]; // If the conveyor bellows extended to snap on construction, the clearance through which they snapped will be here
                 }
-                candidates.Add( FactoryConnectionCandidate(buildableConveyor->mConnection1, minConnectorDistance, maxConnectorDistance) );
+                candidates.Add(FactoryConnectionCandidate(buildableConveyor->GetConnection1(), minConnectorDistance, maxConnectorDistance));
                 break;
             case EFactoryConnectionDirection::FCD_OUTPUT:
                 if (conveyorLift)
                 {
                     minConnectorDistance = CONVEYOR_LIFT_MIN_DISTANCE;
                     maxConnectorDistance =
-                        buildableConveyor->mConnection0->GetConnectorClearance() + // mConnection0 is always the input connection
+                        buildableConveyor->GetConnection0()->GetConnectorClearance() + // Connection0 is always the input connection
                         conveyorLift->mOpposingConnectionClearance[0]; // If the conveyor bellows extended to snap on construction, the clearance through which they snapped will be here
                 }
-                candidates.Add( FactoryConnectionCandidate(buildableConveyor->mConnection0, minConnectorDistance, maxConnectorDistance) );
+                candidates.Add(FactoryConnectionCandidate(buildableConveyor->GetConnection0(), minConnectorDistance, maxConnectorDistance));
                 break;
             }
+        }
+        else if (auto buildable = Cast<AFGBuildable>(actor))
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining buildable %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
+            TInlineComponentArray<UFGFactoryConnectionComponent*> openConnections;
+            FindOpenBeltConnections(openConnections, buildable);
+
+            for (auto openConnection : openConnections)
+            {
+                candidates.Add(FactoryConnectionCandidate(openConnection, 0, 0));
+            }
+        }
+        else
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Ignoring hit result actor %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
         }
     }
 
@@ -180,7 +468,11 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         auto minConnectorDistance = candidate.MinConnectorDistance;
         auto maxConnectorDistance = candidate.MaxConnectorDistance;
 
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining connection: %s (%s). Max distance: %f"), *otherConnection->GetName(), *otherConnection->GetClass()->GetName(), maxConnectorDistance);
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining connection: %s (%s). Min distance %f. Max distance: %f"),
+            *otherConnection->GetName(),
+            *otherConnection->GetClass()->GetName(),
+            minConnectorDistance,
+            maxConnectorDistance);
 
         if (!IsValid(otherConnection))
         {
@@ -231,18 +523,19 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
             continue;
         }
 
-        // If we're within 1 cm, then we can just take this one as the best one. There could be multiple this close but that's extremely rare and just choosing one seems fine.
-        // This makes sense and prevents the dot product math below, plus avoids some cases where things are barely overlapping and giving false dot product negatives.
+        // If we're within 1 cm, then we can just take this one as the best one. This isn't possible with conveyor lifts but is with belt. There could be multiple this
+        // close but that's extremely rare and just choosing one seems fine.
+        // This prevents the dot product math below, plus avoids some cases where things are barely overlapping and giving false dot product negatives.
         if (distanceSq < 1)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound one that's so close, we'll just take it as the final result: %s"), *otherLocation.ToCompactString());
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound one that's less than 1 cm away; take it as the best result. Location: %s"), *otherLocation.ToString());
             closestDistanceSq = distanceSq;
             compatibleConnectionComponent = otherConnection;
             break;
         }
 
         // Determine if both connectors are in front of each other (meaning they're facing each other).
-        // If we don't do this check, the connectors might be facing away or physically past each other.
+        // If we don't do this check, the connectors might be facing away or overlapping but past each other.
         // 
         // If a dot product is positive, then the vectors are less than 90 degrees apart.
         // So this dot product should be negative, meaning the connector normal is pointing AGAINST the vector from the candidate to the connector
@@ -257,7 +550,7 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
 
         if (distanceSq < closestDistanceSq)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound a new closest one at: %s"), *otherLocation.ToCompactString());
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection:\tFound a new closest one at: %s"), *otherLocation.ToString());
             closestDistanceSq = distanceSq;
             compatibleConnectionComponent = otherConnection;
         }
@@ -272,72 +565,69 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
     connectionComponent->SetConnection(compatibleConnectionComponent);
 }
 
-void FAutoLinkModule::FindAndLinkCompatiblePipeConnection(UFGPipeConnectionComponent* connectionComponent, IFGFluidIntegrantInterface* owningFluidIntegrant)
+void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent)
 {
     if (connectionComponent->IsConnected())
     {
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection: Exiting because the connection component is already connected"));
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Exiting because the connection component is already connected"));
         return;
     }
 
     auto connectorLocation = connectionComponent->GetConnectorLocation();
-    auto searchEnd = connectorLocation + connectionComponent->GetConnectorNormal();
-    auto world = connectionComponent->GetWorld();
+    // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
+    auto searchStart = connectorLocation + (FVector::UpVector * 10);
+    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 1000);
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection: connector at: %s, searchEnd is at: %s, connectorLocation+normal: %s"), *connectorLocation.ToString(), *searchEnd.ToString(), *(connectorLocation + connectionComponent->GetConnectorNormal()).ToString());
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s, searchStart is %s, searchEnd is at: %s"),
+        *connectorLocation.ToString(),
+        *searchStart.ToString(),
+        *searchEnd.ToString());
 
-    TArray< FHitResult > hitResults;
-    world->LineTraceMultiByObjectType(
-        hitResults,
-        connectorLocation,
+    TArray< AActor* > hitActors;
+    HitScan(
+        hitActors,
+        connectionComponent->GetWorld(),
+        searchStart,
         searchEnd,
-        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects));
+        connectionComponent->GetOwner());
 
-    TArray< UFGPipeConnectionComponent* > candidates;
-    for (const FHitResult& result : hitResults)
+    TArray< UFGRailroadTrackConnectionComponent* > candidates;
+    for (auto actor : hitActors)
     {
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection: Examining result: %s (%s)"), *result.GetActor()->GetName(), *result.GetActor()->GetClass()->GetName());
-
-        auto actor = result.GetActor();
-        if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
+        if (auto buildable = Cast<AFGBuildable>(actor))
         {
-            if (auto manager = AAbstractInstanceManager::GetInstanceManager(actor))
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Examining buildable %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
+            TInlineComponentArray<UFGRailroadTrackConnectionComponent*> openConnections;
+            FindOpenRailroadConnections(openConnections, buildable);
+
+            for (auto openConnection : openConnections)
             {
-                FInstanceHandle handle;
-                if (manager->ResolveHit(result, handle))
-                {
-                    actor = handle.GetOwner();
-                }
+                candidates.Add(openConnection);
             }
         }
-
-        if (auto fluidInterface = Cast<IFGFluidIntegrantInterface>(actor))
+        else
         {
-            candidates.Append(fluidInterface->GetPipeConnections());
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Ignoring hit result actor %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
         }
     }
 
-    float closestDistanceSq = FLT_MAX;
-    UFGPipeConnectionComponent* compatibleConnectionComponent = nullptr;
     for (auto otherConnection : candidates)
     {
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection:Examining connection: %s (%s). Connection type %d"), *otherConnection->GetName(), *otherConnection->GetClass()->GetName(), otherConnection->GetPipeConnectionType());
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Examining connection: %s (%s) at %s (%f units away)"),
+            *otherConnection->GetName(),
+            *otherConnection->GetClass()->GetName(),
+            *otherConnection->GetConnectorLocation().ToString(),
+            FVector::Distance(connectorLocation, otherConnection->GetConnectorLocation()));
 
         if (!IsValid(otherConnection))
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection:\tNot valid!"));
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tNot valid!"));
             continue;
         }
 
         if (otherConnection->IsConnected())
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection:\tAlready connected!"));
-            continue;
-        }
-
-        if (!otherConnection->CanConnectTo(connectionComponent))
-        {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection:\tCannot be connected to this!"));
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tAlready connected!"));
             continue;
         }
 
@@ -348,39 +638,179 @@ void FAutoLinkModule::FindAndLinkCompatiblePipeConnection(UFGPipeConnectionCompo
         auto isCollinear = crossProduct.IsNearlyZero(.01);
         if (!isCollinear)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection:\tOther connection normal is not collinear with this connector normal! The parts are not aligned!"), );
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tOther connection normal is not collinear with this connector normal! The parts are not aligned!"), );
+            continue;
+        }
+
+        // For belt connectors, we do dot product things to ensure they are facing each other because conveyor lifts can be further away,
+        // meaning they could also theoretically be on the wrong side (e.g. clipping through the factory). These have to be virtually touching
+        // for us to link them so we just make double sure of that here.
+        const FVector otherLocation = otherConnection->GetConnectorLocation();
+        const float distanceSq = FVector::DistSquared(otherLocation, connectorLocation);
+
+        if (distanceSq > 1) // Anything more than a 1 cm away is too far (and most are even much closer, based on my tests)
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tConnection is too far away to be auto-linked!"), );
+            continue;
+        }
+
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close; taking it as the best result. Location: %s"), *otherLocation.ToString());
+        otherConnection->AddConnection(connectionComponent);
+    }
+
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: No compatible connection found"));
+}
+
+bool FAutoLinkModule::FindAndLinkCompatibleFluidConnection(UFGPipeConnectionComponent* connectionComponent)
+{
+    if (connectionComponent->IsConnected())
+    {
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleFluidConnection: Exiting because the connection component is already connected"));
+        return false;
+    }
+
+    auto connectorLocation = connectionComponent->GetConnectorLocation();
+    // Search a small extra distance straight out from the connector. Though we will limit pipes to 1 cm away, sometimes the hit box for the containing actor is a bit further
+    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 10);
+
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleFluidConnection: Connector at: %s, searchEnd is at: %s"), *connectorLocation.ToString(), *searchEnd.ToString());
+
+    TArray< AActor* > hitActors;
+    HitScan(
+        hitActors,
+        connectionComponent->GetWorld(),
+        connectorLocation,
+        searchEnd,
+        connectionComponent->GetOwner());
+
+    TArray< UFGPipeConnectionComponentBase* > candidates;
+    for (auto actor : hitActors)
+    {
+        if (auto buildable = Cast<AFGBuildable>(actor))
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleFluidConnection: Examining buildable %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
+            TInlineComponentArray<UFGPipeConnectionComponent*> openConnections;
+            FindOpenFluidConnections(openConnections, buildable);
+
+            for (auto openConnection : openConnections)
+            {
+                candidates.Add(openConnection);
+            }
+        }
+        else
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleFluidConnection: Ignoring hit result actor %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
+        }
+    }
+
+    return ConnectBestPipeCandidate(connectionComponent, candidates);
+}
+
+bool FAutoLinkModule::FindAndLinkCompatibleHyperConnection(UFGPipeConnectionComponentHyper* connectionComponent)
+{
+    if (connectionComponent->IsConnected())
+    {
+        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleHyperConnection: Exiting because the connection component is already connected"));
+        return false;
+    }
+
+    auto connectorLocation = connectionComponent->GetConnectorLocation();
+    // Search a small extra distance straight out from the connector. Though we will limit pipes to 1 cm away, sometimes the hit box for the containing actor is a bit further
+    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 10);
+
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleHyperConnection: Connector at: %s, searchEnd is at: %s"), *connectorLocation.ToString(), *searchEnd.ToString());
+
+    TArray< AActor* > hitActors;
+    HitScan(
+        hitActors,
+        connectionComponent->GetWorld(),
+        connectorLocation,
+        searchEnd,
+        connectionComponent->GetOwner());
+
+    TArray< UFGPipeConnectionComponentBase* > candidates;
+    for (auto actor : hitActors)
+    {
+        if (auto buildable = Cast<AFGBuildable>(actor))
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleHyperConnection: Examining buildable %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
+            TInlineComponentArray<UFGPipeConnectionComponentHyper*> openConnections;
+            FindOpenHyperConnections(openConnections, buildable);
+
+            for (auto openConnection : openConnections)
+            {
+                candidates.Add(openConnection);
+            }
+        }
+        else
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleHyperConnection: Ignoring hit result actor %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
+        }
+    }
+
+    return ConnectBestPipeCandidate(connectionComponent, candidates);
+}
+
+bool FAutoLinkModule::ConnectBestPipeCandidate(UFGPipeConnectionComponentBase* connectionComponent, TArray<UFGPipeConnectionComponentBase*>& candidates)
+{
+    auto connectorLocation = connectionComponent->GetConnectorLocation();
+    for (auto otherConnection : candidates)
+    {
+        AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate: Examining connection: %s (%s) at %s (%f units away). Connection type %d"),
+            *otherConnection->GetName(),
+            *otherConnection->GetClass()->GetName(),
+            *otherConnection->GetConnectorLocation().ToString(),
+            FVector::Distance(connectorLocation, otherConnection->GetConnectorLocation()),
+            otherConnection->GetPipeConnectionType());
+
+        if (!IsValid(otherConnection))
+        {
+            AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate:\tNot valid!"));
+            continue;
+        }
+
+        if (otherConnection->IsConnected())
+        {
+            AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate:\tAlready connected!"));
+            continue;
+        }
+
+        if (!otherConnection->CanConnectTo(connectionComponent))
+        {
+            AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate:\tCannot be connected to this!"));
+            continue;
+        }
+
+        const FVector connectorNormal = connectionComponent->GetConnectorNormal();
+
+        // Determine if the connections components are aligned
+        const FVector crossProduct = FVector::CrossProduct(connectorNormal, otherConnection->GetConnectorNormal());
+        auto isCollinear = crossProduct.IsNearlyZero(.01);
+        if (!isCollinear)
+        {
+            AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate:\tOther connection normal is not collinear with this connector normal! The parts are not aligned!"), );
             continue;
         }
 
         // For belt connectors, we do dot product things to ensure they are facing each other because conveyor lifts can be further away,
         // meaning they could also theoretically be on the wrong side (e.g. clipping through the factory). Pipes have to be virtually touching
         // for us to link them so we just make double sure of that here.
-
         const FVector otherLocation = otherConnection->GetConnectorLocation();
         const float distanceSq = FVector::DistSquared(otherLocation, connectorLocation);
-        if (distanceSq > 1)
+
+        if (distanceSq > 1) // Anything more than a 1 cm away is too far (and most are even much closer, based on my tests)
         {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection:\tPipe is too far away to be auto-linked!"), );
+            AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate:\tConnection is too far away to be auto-linked!"), );
             continue;
         }
 
-        if (distanceSq < closestDistanceSq)
-        {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection:\tFound a new closest one at: %s"), *otherLocation.ToCompactString());
-            closestDistanceSq = distanceSq;
-            compatibleConnectionComponent = otherConnection;
-        }
+        AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate:\tFound one that's extremely close; taking it as the best result. Location: %s"), *otherLocation.ToString());
+        otherConnection->SetConnection(connectionComponent);
+        return true;
     }
 
-    if (!compatibleConnectionComponent)
-    {
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatiblePipeConnection: No compatible overlapping connection found"));
-        return;
-    }
-
-    compatibleConnectionComponent->SetConnection(connectionComponent);
-    auto pipeSubsystem = AFGPipeSubsystem::GetPipeSubsystem(world);
-    pipeSubsystem->RegisterFluidIntegrant(owningFluidIntegrant);
+    AL_LOG(Verbose, TEXT("ConnectBestPipeCandidate: No compatible connection found"));
+    return false;
 }
 
 #undef AL_LOG
