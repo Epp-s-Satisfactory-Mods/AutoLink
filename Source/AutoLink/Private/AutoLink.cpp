@@ -406,7 +406,7 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         searchEnd,
         connectionComponent->GetOwner());
 
-    // 12 is a random guess of the max possible candidates we could reasonably see
+    // 12 is a random guess of the max possible candidates we could ever really see
     TArray<FactoryConnectionCandidate, TInlineAllocator<12>> candidates;
     for (auto actor : hitActors)
     {
@@ -414,8 +414,8 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining buildable conveyor base %s of type %s"), *buildableConveyor->GetName(), *buildableConveyor->GetClass()->GetName());
             // Conveyor belts or conveyor lift
-            const float CONVEYOR_LIFT_MIN_DISTANCE = 100.f;
-            auto minConnectorDistance = 0.0f; // Conveyor lifts have some natural clearance
+            const float CONVEYOR_LIFT_MIN_DISTANCE = 100.f; // Conveyor lifts have some natural clearance
+            auto minConnectorDistance = 0.0f;
             auto maxConnectorDistance = 0.0f; // Conveyor belts have to be touching the connector; if it's a conveyor lift, we'll change this accordingly in a bit
             auto conveyorLift = Cast<AFGBuildableConveyorLift>(actor);
 
@@ -576,7 +576,8 @@ void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackCo
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
     auto searchStart = connectorLocation + (FVector::UpVector * 10);
-    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 1000);
+    // Search a small extra distance straight out from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
+    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 10);
 
     AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s, searchStart is %s, searchEnd is at: %s"),
         *connectorLocation.ToString(),
@@ -656,6 +657,7 @@ void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackCo
 
         AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close; taking it as the best result. Location: %s"), *otherLocation.ToString());
         otherConnection->AddConnection(connectionComponent);
+        break;
     }
 
     AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: No compatible connection found"));
