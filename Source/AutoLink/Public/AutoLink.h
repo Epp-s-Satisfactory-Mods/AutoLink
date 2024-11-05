@@ -69,7 +69,15 @@ public:
         UWorld* world,
         FVector scanStart,
         FVector scanEnd,
-        AActor* ignoreActor ); // The hit scan can resolve to the buildable we're trying to find connections for (and multiple times too),
+        AActor* ignoreActor ); // The scan can resolve to the buildable we're trying to find connections for (and multiple times too),
+                               // which will never be the right result and can involve some deep, unnecessary searching. Allows us to skip it.
+
+    static void OverlapScan(
+        TArray<AActor*>& actors,
+        UWorld* world,
+        FVector scanStart,
+        float radius,
+        AActor* ignoreActor ); // The scan can resolve to the buildable we're trying to find connections for (and multiple times too),
                                // which will never be the right result and can involve some deep, unnecessary searching. Allows us to skip it.
 
     static void FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionComponent* connectionComponent);

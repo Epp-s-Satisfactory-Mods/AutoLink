@@ -724,12 +724,17 @@ void FAutoLinkModule::HitScan(
     FVector scanEnd,
     AActor* ignoreActor )
 {
+    AL_LOG(Verbose, TEXT("HitScan: Scanning from %s to %s"), *scanStart.ToString(), *scanEnd.ToString());
+
     TArray< FHitResult > hitResults;
+    auto collisionQueryParams = FCollisionQueryParams();
+    collisionQueryParams.AddIgnoredActor(ignoreActor);
     world->LineTraceMultiByObjectType(
         hitResults,
         scanStart,
         scanEnd,
-        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects));
+        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects),
+        collisionQueryParams );
 
     for (const FHitResult& result : hitResults)
     {
@@ -746,13 +751,56 @@ void FAutoLinkModule::HitScan(
             }
         }
 
-        if (actor == ignoreActor)
+        AL_LOG(Verbose, TEXT("HitScan: Hit actor %s of type %s at %s. Actor is at %s"),
+            *actor->GetName(),
+            *actor->GetClass()->GetName(),
+            *result.Location.ToString(),
+            *actor->GetActorLocation().ToString());
+
+        actors.Add(actor);
+    }
+}
+
+void FAutoLinkModule::OverlapScan(
+    TArray<AActor*>& actors,
+    UWorld* world,
+    FVector scanStart,
+    float radius,
+    AActor* ignoreActor )
+{
+    AL_LOG(Verbose, TEXT("OverlapScan: Scanning from %s with radius %f"), *scanStart.ToString(), radius);
+
+    TArray< FOverlapResult > overlapResults;
+    auto collisionQueryParams = FCollisionQueryParams();
+    collisionQueryParams.AddIgnoredActor(ignoreActor);
+    world->OverlapMultiByObjectType(
+        overlapResults,
+        scanStart,
+        FQuat::Identity,
+        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects),
+        FCollisionShape::MakeSphere(radius),
+        collisionQueryParams);
+
+    for (const FOverlapResult& result : overlapResults)
+    {
+        auto actor = result.GetActor();
+        if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
         {
-            AL_LOG(Verbose, TEXT("HitScan: Per ignoreActor, IGNORING hit actor %s of type %s at %s"), *actor->GetName(), *actor->GetClass()->GetName(), *result.Location.ToString());
-            continue;
+            if (auto manager = AAbstractInstanceManager::GetInstanceManager(actor))
+            {
+                FInstanceHandle handle;
+                if (manager->ResolveOverlap(result, handle))
+                {
+                    actor = handle.GetOwner();
+                }
+            }
         }
 
-        AL_LOG(Verbose, TEXT("HitScan: Hit actor %s of type %s at %s"), *actor->GetName(), *actor->GetClass()->GetName(), *result.Location.ToString());
+        AL_LOG(Verbose, TEXT("OverlapScan: Hit actor %s of type %s. Actor is at %s (%f units away from the search start)"),
+            *actor->GetName(),
+            *actor->GetClass()->GetName(),
+            *actor->GetActorLocation().ToString(),
+            (actor->GetActorLocation() - scanStart).Length());
 
         actors.Add(actor);
     }
@@ -763,20 +811,6 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
     if (connectionComponent->IsConnected())
     {
         AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Exiting because the connection component is already connected"));
-        return;
-    }
-
-    auto connectionDirection = connectionComponent->GetDirection();
-    switch(connectionDirection)
-    {
-    case EFactoryConnectionDirection::FCD_INPUT:
-    case EFactoryConnectionDirection::FCD_OUTPUT:
-        break;
-    default:
-        // EFactoryConnectionDirection::FCD_SNAP_ONLY is apparently used for conveyor poles and we don't need to link those since they're cosmetic.
-        // EFactoryConnectionDirection::FCD_ANY or others, I don't know where they'd be used and I suspect they're unnecessary. Can come back and
-        // handle them later if that's wrong.
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Exiting because the connection direction is: %d"), connectionDirection);
         return;
     }
 
@@ -807,11 +841,10 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
 
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * searchDistance);
+    auto connectionDirection = connectionComponent->GetDirection();
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Connector at: %s, searchEnd is at: %s, searchDistance is %f, direction is: %d"),
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Connector at: %s, direction is: %d"),
         *connectorLocation.ToString(),
-        *searchEnd.ToString(),
-        searchDistance,
         connectionDirection);
 
     TArray< AActor* > hitActors;
@@ -1054,48 +1087,17 @@ void FAutoLinkModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackCo
     // Search a small extra distance from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
     auto searchRadius = 10.0f;
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s, searchStart is %s, searchRadius is %f"),
-        *connectorLocation.ToString(),
-        *searchStart.ToString(),
-        searchRadius);
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Connector at: %s"), *connectorLocation.ToString());
 
-    // Curved rails don't always seem to be hit by the normal linear hitscan out of the connector normal
-    // so we do a radius search here to be sure we're getting good candidates.
+    // Curved rails don't always seem to be hit by linear hitscan out of the connector normal so we do a radius search here to be sure we're getting good candidates.
     auto connectionOwner = connectionComponent->GetOwner();
-    TArray< FOverlapResult > overlapResults;
-    connectionComponent->GetWorld()->OverlapMultiByObjectType(
-        overlapResults,
-        searchStart,
-        FQuat::Identity,
-        FCollisionObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects),
-        FCollisionShape::MakeSphere(searchRadius));
-
     TArray< AActor* > hitActors;
-    for (const FOverlapResult& result : overlapResults)
-    {
-        auto actor = result.GetActor();
-        if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
-        {
-            if (auto manager = AAbstractInstanceManager::GetInstanceManager(actor))
-            {
-                FInstanceHandle handle;
-                if (manager->ResolveOverlap(result, handle))
-                {
-                    actor = handle.GetOwner();
-                }
-            }
-        }
-
-        if (actor == connectionOwner)
-        {
-            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: IGNORING connection owner %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
-            continue;
-        }
-
-        AL_LOG(Verbose, TEXT("FindAndLinkCompatibleRailroadConnection: Hit actor %s of type %s"), *actor->GetName(), *actor->GetClass()->GetName());
-
-        hitActors.Add(actor);
-    }
+    OverlapScan(
+        hitActors,
+        connectionComponent->GetWorld(),
+        searchStart,
+        searchRadius,
+        connectionOwner);
 
     TArray< UFGRailroadTrackConnectionComponent* > candidates;
     for (auto actor : hitActors)
@@ -1195,23 +1197,21 @@ bool FAutoLinkModule::FindAndLinkCompatibleFluidConnection(UFGPipeConnectionComp
         return false;
     }
 
-    auto connectorLocation = connectionComponent->GetConnectorLocation();
-    // Search a small extra distance straight out from the connector. Though we will limit pipes to 1 cm away, sometimes the hit box for the containing actor is a bit further
-    auto searchEnd = connectorLocation + (connectionComponent->GetConnectorNormal() * 10);
+    auto searchStart = connectionComponent->GetConnectorLocation();
+    // Search a small extra distance out from the connector. Though we will limit pipes to 1 cm away, sometimes the hit box for the containing actor is a bit further
+    auto searchRadius = 50.0f;
 
-    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleFluidConnection: Connection: %s (%s) with connection type %d. Connector at %s. searchEnd: %s"),
+    AL_LOG(Verbose, TEXT("FindAndLinkCompatibleFluidConnection: Connection: %s (%s) with connection type %d"),
         *connectionComponent->GetName(),
         *connectionComponent->GetClass()->GetName(),
-        connectionComponent->GetPipeConnectionType(),
-        *connectorLocation.ToString(),
-        *searchEnd.ToString());
+        connectionComponent->GetPipeConnectionType());
 
     TArray< AActor* > hitActors;
-    HitScan(
+    OverlapScan(
         hitActors,
         connectionComponent->GetWorld(),
-        connectorLocation,
-        searchEnd,
+        searchStart,
+        searchRadius,
         connectionComponent->GetOwner());
 
     TArray< UFGPipeConnectionComponentBase* > candidates;
