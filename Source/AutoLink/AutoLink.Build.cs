@@ -13,7 +13,6 @@ public class AutoLink : ModuleRules
 		// Some entries are commented out to avoid compile-time warnings about depending on a module that you don't explicitly depend on.
 		// You can uncomment these as necessary when your code actually needs to use them.
 		PublicDependencyModuleNames.AddRange(new string[] {
-			"AbstractInstance",
 			"Core", "CoreUObject",
 			"Engine",
 			"DeveloperSettings",
@@ -46,7 +45,7 @@ public class AutoLink : ModuleRules
 
 		// FactoryGame plugins
 		PublicDependencyModuleNames.AddRange(new string[] {
-			//"AbstractInstance",
+			"AbstractInstance",
 			//"InstancedSplinesComponent",
 			//"SignificanceISPC"
 		});
