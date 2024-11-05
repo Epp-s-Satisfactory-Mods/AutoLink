@@ -23,6 +23,9 @@ public:
 #if AL_DEBUGGING
     static void DumpConnection(FString prefix, UFGFactoryConnectionComponent* c);
     static void DumpConveyor(FString prefix, AFGBuildableConveyorBase* conveyor);
+
+    static void DumpConnection(FString prefix, UFGPipeConnectionComponent* c);
+    static void DumpFluidIntegrant(FString prefix, IFGFluidIntegrantInterface* p);
 #endif
 
     virtual void StartupModule() override;
@@ -30,14 +33,14 @@ public:
     static bool ShouldTryToAutoLink(AFGBuildable* buildable);
     static void FindAndLinkForBuildable(AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfOpen(
+    static void FORCEINLINE AddIfCandidate(
         TInlineComponentArray<UFGFactoryConnectionComponent*>& openConnections,
         UFGFactoryConnectionComponent* connection);
     static void FindOpenBeltConnections(
         TInlineComponentArray<UFGFactoryConnectionComponent*>& openConnections,
         AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfOpen(
+    static void FORCEINLINE AddIfCandidate(
         TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
         UFGPipeConnectionComponent* connection,
         IFGFluidIntegrantInterface* owningFluidIntegrant);
@@ -45,14 +48,14 @@ public:
         TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
         AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfOpen(
+    static void FORCEINLINE AddIfCandidate(
         TInlineComponentArray<UFGPipeConnectionComponentHyper*>& openConnections,
         UFGPipeConnectionComponentHyper* connection);
     static void FindOpenHyperConnections(
         TInlineComponentArray<UFGPipeConnectionComponentHyper*>& openConnections,
         AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfOpen(
+    static void FORCEINLINE AddIfCandidate(
         TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections,
         UFGRailroadTrackConnectionComponent* connection);
     static void FindOpenRailroadConnections(
