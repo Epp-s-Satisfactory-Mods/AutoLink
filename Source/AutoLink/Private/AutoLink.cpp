@@ -345,8 +345,10 @@ void FAutoLinkModule::StartupModule()
 #undef SHORT_CIRCUIT_TYPE
 
 #define SUBSCRIBE_CONFIGURE_COMPONENTS( T )\
-    SUBSCRIBE_METHOD_VIRTUAL_AFTER(T::ConfigureComponents, GetMutableDefault<T>(),\
-    [](const T* hologram, AFGBuildable* buildable)\
+    SUBSCRIBE_METHOD_VIRTUAL_AFTER(\
+        T::ConfigureComponents,\
+        GetMutableDefault<T>(),\
+        [](const T* hologram, AFGBuildable* buildable)\
         {\
             AL_LOG(Verbose, TEXT( #T "::ConfigureComponents: The hologram is %s and buildable is %s at %s"), *hologram->GetName(), *buildable->GetName(), *buildable->GetActorLocation().ToString());\
             FindAndLinkForBuildable(buildable);\
@@ -363,9 +365,7 @@ void FAutoLinkModule::StartupModule()
     SUBSCRIBE_CONFIGURE_COMPONENTS(AFGConveyorAttachmentHologram);
     SUBSCRIBE_CONFIGURE_COMPONENTS(AFGPipeHyperAttachmentHologram);
     SUBSCRIBE_CONFIGURE_COMPONENTS(AFGPipelineAttachmentHologram);
-
 #undef SUBSCRIBE_CONFIGURE_COMPONENTS
-
 }
 
 bool FAutoLinkModule::ShouldTryToAutoLink(AFGBuildable* buildable)
@@ -861,15 +861,26 @@ void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionCo
     {
         if (auto hitConveyor = Cast<AFGBuildableConveyorBase>(actor))
         {
-            // Special case for when we can get at the connections without scanning all the components
+            // We always consider conveyors as candidates and we can get their candidate connection faster than searching all their components
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining conveyor %s of type %s"), *hitConveyor->GetName(), *hitConveyor->GetClass()->GetName());
             auto candidateConnection = connectionDirection == EFactoryConnectionDirection::FCD_INPUT
                 ? hitConveyor->GetConnection1()
                 : hitConveyor->GetConnection0();
 
             candidates.Add(candidateConnection);
+            continue;
         }
-        else if (auto buildable = Cast<AFGBuildable>(actor))
+
+        // If we are NOT a conveyor (either a belt or a lift), then we shouldn't consider non-conveyors for attachment.  Autolinking between attachments
+        // or attachments and buildings causes crashes in the base game's multithreaded code.  We just checked whether this candidate is a conveyor so
+        // nothing else can be a valid candidate unless we are a conveyor.
+        if (!connectionConveyorBelt && !connectionConveyorLift)
+        {
+            AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: NOT considering hit result actor %s of type %s because Connector is not on a conveyor"), *actor->GetName(), *actor->GetClass()->GetName());
+            continue;
+        }
+
+        if (auto buildable = Cast<AFGBuildable>(actor))
         {
             AL_LOG(Verbose, TEXT("FindAndLinkCompatibleBeltConnection: Examining buildable %s of type %s"), *buildable->GetName(), *buildable->GetClass()->GetName());
             TInlineComponentArray<UFGFactoryConnectionComponent*> openConnections;
