@@ -16,15 +16,15 @@
 
 DEFINE_LOG_CATEGORY(LogAutoLink)
 
-// The mod template does this but we have no text to localiz
+// The mod template does this but we have no text to localize
 #define LOCTEXT_NAMESPACE "FAutoLinkModule"
 
-// Set this to 1 before building to actually log debug messages, 0 to turn them into no-ops at compile time
-// I made this compile-time because I'm lazy, don't want to mess with log levels, and would prefer the shipping mod minimize perf impact.
-#define LOG_DEBUG_INFO 0
+// When we're building to ship, set this to 0 to no-op logging and minimize performance impact. Would prefer to do this through
+// build defines based on whether we're building for development or shipping but at the moment alpakit always builds shipping.
+#define AL_LOG_DEBUG_TEXT 1
 
-#if LOG_DEBUG_INFO
-#define AL_LOG(Verbosity, Format, ...) \
+#if AL_LOG_DEBUG_TEXT
+#define AL_LOG(Verbosity, Format, ...)\
     UE_LOG( LogAutoLink, Verbosity, Format, ##__VA_ARGS__ )
 #else
 #define AL_LOG(Verbosity, Format, ...)
@@ -85,7 +85,7 @@ void FAutoLinkModule::ConfigureComponentsHook(const AFGBuildableHologram* builda
     }
 }
 
-void FAutoLinkModule::FindAndLinkCompatibleBeltConnection( UFGFactoryConnectionComponent* connectionComponent)
+void FAutoLinkModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionComponent* connectionComponent)
 {
     if (connectionComponent->IsConnected())
     {
@@ -384,6 +384,7 @@ void FAutoLinkModule::FindAndLinkCompatiblePipeConnection(UFGPipeConnectionCompo
 }
 
 #undef AL_LOG
+#undef AL_LOG_DEBUG_TEXT
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_GAME_MODULE(FAutoLinkModule, AutoLink)
