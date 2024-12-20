@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 0,
-	"VersionName": "0.5.4",
+	"VersionName": "0.5.5",
 	"FriendlyName": "AutoLink",
 	"Description": "If things look connected, they will be connected. Blueprints tile and structures automatically hook up to all incoming/outgoing connections.",
 	"Category": "Modding",
@@ -25,7 +25,7 @@
 		{
 			"Name": "SML",
 			"Enabled": true,
-			"SemVersion": "^3.8.0"
+			"SemVersion": "^3.9.0"
 		},
 		{
 			"Name": "AbstractInstance",
@@ -33,6 +33,6 @@
 			"BasePlugin": true
 		}
 	],
-	"SemVersion": "0.5.4",
-	"GameVersion": ">=377620"
+	"SemVersion": "0.5.5",
+	"GameVersion": ">=383729"
 }
