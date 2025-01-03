@@ -10,26 +10,9 @@
 #include "FGRailroadTrackConnectionComponent.h"
 #include "Modules/ModuleManager.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogAutoLink, Verbose, All);
-
-// When we're building to ship, set this to 0 to no-op logging and debugging functions to minimize performance impact. Would prefer to do
-// this through build defines based on whether we're building for development or shipping but at the moment alpakit always builds shipping.
-#define AL_DEBUGGING 0
-
 class FAutoLinkModule : public FDefaultGameModuleImpl
 {
 public:
-
-#if AL_DEBUGGING
-    static void DumpConnection(FString prefix, UFGFactoryConnectionComponent* c);
-    static void DumpConveyor(FString prefix, AFGBuildableConveyorBase* conveyor);
-
-    static void DumpConnection(FString prefix, UFGPipeConnectionComponent* c);
-    static void DumpFluidIntegrant(FString prefix, IFGFluidIntegrantInterface* p);
-
-    static void DumpConnection(FString prefix, UFGPipeConnectionComponentHyper* c);
-#endif
-
     virtual void StartupModule() override;
 
     static bool ShouldTryToAutoLink(AFGBuildable* buildable);
