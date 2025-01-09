@@ -6,6 +6,7 @@
 #include "AutoLinkLogMacros.h"
 
 #include "AbstractInstanceManager.h"
+#include "BlueprintHookManager.h"
 #include "FGBlueprintHologram.h"
 #include "FGBuildableConveyorBase.h"
 #include "FGBuildableConveyorBelt.h"
@@ -31,6 +32,7 @@
 #include "InstanceData.h"
 #include "Patching/NativeHookManager.h"
 
+#include "NamePermissionList.h"
 
 UAutoLinkRootInstanceModule::UAutoLinkRootInstanceModule()
 {
@@ -42,7 +44,9 @@ UAutoLinkRootInstanceModule::~UAutoLinkRootInstanceModule()
 
 void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
 {
-    if (phase != ELifecyclePhase::CONSTRUCTION)
+    AL_LOG("UAutoLinkRootInstanceModule::DispatchLifecycleEvent: Phase %d", phase);
+
+    if (phase != ELifecyclePhase::INITIALIZATION)
     {
         Super::DispatchLifecycleEvent(phase);
         return;
@@ -54,15 +58,113 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
         return;
     }
 
-    AL_LOG("StartupModule: Hooking Functions...");
+    if (AL_DEBUG_ENABLED)
+    {
+        RegisterDebugHooks();
 
-#if AL_DEBUG_ENABLED
-    AutoLinkDebugging::RegisterDebugHooks();
-#endif
+        if(!AL_DEBUG_ENABLE_MOD)
+        {
+            Super::DispatchLifecycleEvent(phase);
+            return;
+        }
+    }
 
-#if AL_DEBUG_ENABLED && AL_REGISTER_DEBUG_TRACE_HOOKS
-    AutoLinkDebugging::RegisterDebugTraceHooks();
-#endif
+    AL_LOG("UAutoLinkRootInstanceModule: Hooking Mod Functions...");
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetBeltSourceSplinesOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildableConveyorBelt*>& inBelts, TArray<AActor*>& orderedActors) {
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        int i = 0;
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE: inBelts: %d", inBelts.Num());
+        for (auto belt : inBelts)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE:\t inBelts[%d]: %s", i++, *belt->GetName());
+        }
+        TArray<AActor*> actors;
+        auto splines = scope(self, inBelts, actors);
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER: actors: %d", actors.Num());
+        i = 0;
+        for (auto actor : actors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER:\t actors[%d]: %s", i++, *actor->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER: Total Splines: %d", splines.Num());
+        i = 0;
+        for (USplineComponent* spline : splines)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER:\t splines[%d]: %s. Owner: %s", i++, *spline->GetName(), *spline->GetOwner()->GetName());
+        }
+        splines = splines.FilterByPredicate([&](USplineComponent* spline) { return inBelts.Contains(spline->GetOwner()); });
+        auto filteredActors = actors.FilterByPredicate([&](AActor* actor) { return inBelts.Contains(actor); });
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: filteredActors: %d", actors.Num());
+        i = 0;
+        for (auto actor : filteredActors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t filteredActors[%d]: %s", i++, *actor->GetName());
+        }
+        orderedActors.Append(filteredActors);
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
+        i = 0;
+        for (auto actor : orderedActors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: Total Splines: %d", splines.Num());
+        i = 0;
+        for (USplineComponent* spline : splines)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered END");
+        return splines;
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetPipeSourceSplineOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildablePipeBase*>& inPipes, TArray<AActor*>& orderedActors) {
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        int i = 0;
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE: inPipes: %d", inPipes.Num());
+        for (auto pipe : inPipes)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE:\t inPipes[%d]: %s", i++, *pipe->GetName());
+        }
+        TArray<AActor*> actors;
+        auto splines = scope(self, inPipes, actors);
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER: actors: %d", actors.Num());
+        i = 0;
+        for (auto actor : actors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER:\t actors[%d]: %s", i++, *actor->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER: Total Splines: %d", splines.Num());
+        i = 0;
+        for (USplineComponent* spline : splines)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER:\t splines[%d]: %s. Owner: %s", i++, *spline->GetName(), *spline->GetOwner()->GetName());
+        }
+        splines = splines.FilterByPredicate([&](USplineComponent* spline) { return inPipes.Contains(spline->GetOwner()); });
+        auto filteredActors = actors.FilterByPredicate([&](AActor* actor) { return inPipes.Contains(actor); });
+
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: filteredActors: %d", actors.Num());
+        i = 0;
+        for (auto actor : filteredActors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t filteredActors[%d]: %s", i++, *actor->GetName());
+        }
+        orderedActors.Append(filteredActors);
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
+        i = 0;
+        for (auto actor : orderedActors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: Total Splines: %d", splines.Num());
+        i = 0;
+        for (USplineComponent* spline : splines)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered END");
+        return splines;
+        });
 
     SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBlueprintHologram::Construct, GetMutableDefault<AFGBlueprintHologram>(),
         [](AActor* returnValue, AFGBlueprintHologram* hologram, TArray< AActor* >& out_children, FNetConstructionID NetConstructionID)
@@ -128,6 +230,17 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
 #undef SUBSCRIBE_CONFIGURE_COMPONENTS
 
     Super::DispatchLifecycleEvent(phase);
+}
+
+void UAutoLinkRootInstanceModule::RegisterDebugHooks()
+{
+    if (!AL_DEBUG_ENABLED) return;
+
+    AutoLinkDebugging::RegisterDebugHooks();
+
+#if AL_REGISTER_DEBUG_TRACE_HOOKS
+    AutoLinkDebugging::RegisterDebugTraceHooks();
+#endif
 }
 
 bool UAutoLinkRootInstanceModule::ShouldTryToAutoLink(AFGBuildable* buildable)

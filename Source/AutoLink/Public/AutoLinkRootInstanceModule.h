@@ -4,6 +4,7 @@
 #include "FGBuildableConveyorBase.h"
 #include "FGBuildableFactory.h"
 #include "FGBuildableHologram.h"
+#include "FGBuildEffectActor.h"
 #include "FGFactoryConnectionComponent.h"
 #include "FGFluidIntegrantInterface.h"
 #include "FGPipeConnectionComponent.h"
@@ -23,6 +24,7 @@ public:
     ~UAutoLinkRootInstanceModule();
 
     virtual void DispatchLifecycleEvent(ELifecyclePhase phase) override;
+    void RegisterDebugHooks();
 
     static bool ShouldTryToAutoLink(AFGBuildable* buildable);
     static void FindAndLinkForBuildable(AFGBuildable* buildable);
