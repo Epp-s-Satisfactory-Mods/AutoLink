@@ -21,4 +21,6 @@ public:
     static void DumpFluidIntegrant(FString prefix, IFGFluidIntegrantInterface* f);
     static void DumpConnection(FString prefix, UFGPipeConnectionComponentHyper* c);
     static void DumpBuildEffectActor(FString prefix, const AFGBuildEffectActor* b);
+
+    static void CreateVisualsHook(AFGBuildEffectActor* self);
 };
