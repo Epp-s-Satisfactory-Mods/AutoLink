@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
 	"Version": 0,
-	"VersionName": "0.5.7",
+	"VersionName": "0.5.8",
 	"FriendlyName": "AutoLink",
-	"Description": "If things look connected, they will be connected. Blueprints tile and structures automatically hook up to all incoming/outgoing connections.",
+	"Description": "Blueprints can tile and structures automatically hook up to all incoming/outgoing connections.",
 	"Category": "Modding",
 	"CreatedBy": "Epp",
 	"CreatedByURL": "",
@@ -33,6 +33,6 @@
 			"BasePlugin": true
 		}
 	],
-	"SemVersion": "0.5.7",
+	"SemVersion": "0.5.8",
 	"GameVersion": ">=383729"
 }
