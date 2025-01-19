@@ -11,10 +11,13 @@
 #include "FGBuildable.h"
 #include "FGBuildableConveyorBelt.h"
 #include "FGBuildablePipeline.h"
+#include "FGBuildablePipelineAttachment.h"
 #include "FGBuildableSubsystem.h"
 #include "FGBuildEffectActor.h"
 #include "FGBuildGun.h"
 #include "FGBuildGunBuild.h"
+#include "FGFluidIntegrantInterface.h"
+#include "FGPipeSubsystem.h"
 #include "Patching/NativeHookManager.h"
 
 void AutoLinkDebugging::RegisterDebugHooks()
@@ -89,10 +92,67 @@ void AutoLinkDebugging::RegisterDebugHooks()
 
             scope(buildGunState, recipe);
         });
+
+    if (AL_REGISTER_DEBUG_TRACE_HOOKS)
+    {
+        RegisterDebugTraceHooks();
+    }
 }
 
 void AutoLinkDebugging::RegisterDebugTraceHooks()
 {
+    if (!AL_DEBUG_ENABLE_MOD)
+    {
+        RegisterDebugTraceForDisabledModFunctions();
+    }
+
+    if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
+    {
+        RegisterBuildEffectTraceHooks();
+    }
+
+    /* AFGBuildableHologram */
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableHologram, ConfigureActor,
+        [](auto& scope, const AFGBuildableHologram* self, AFGBuildable* buildable)
+        {
+            AL_LOG("AFGBuildableHologram::ConfigureActor START %s (%s). Buildable: %s", *self->GetName(), *self->GetClass()->GetName(), *buildable->GetName());
+            scope(self, buildable);
+            AL_LOG("AFGBuildableHologram::ConfigureActor END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableHologram, ConfigureComponents,
+        [&](auto& scope, const AFGBuildableHologram* self, AFGBuildable* buildable)
+        {
+            AL_LOG("AFGBuildableHologram::ConfigureComponents START %s (%s). Buildable: %s", *self->GetName(), *self->GetClass()->GetName(), *buildable->GetName());
+            scope(self, buildable);
+            AL_LOG("AFGBuildableHologram::ConfigureComponents END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableHologram, ConfigureBuildEffect,
+        [](auto& scope, AFGBuildableHologram* self, AFGBuildable* buildable)
+        {
+            AL_LOG("AFGBuildableHologram::ConfigureBuildEffect START %s (%s). Buildable: %s", *self->GetName(), *self->GetClass()->GetName(), *buildable->GetName());
+            scope(self, buildable);
+            AL_LOG("AFGBuildableHologram::ConfigureBuildEffect END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, BeginPlay, [&](auto& scope, AFGBuildable* self) {
+        AL_LOG("AFGBuildable::BeginPlay START %s", *self->GetName());
+        if (auto b = Cast<AFGBuildablePipelineAttachment>(self))
+        {
+            AL_LOG("AFGBuildable::BeginPlay START %d connections", b->GetPipeConnections().Num());
+        }
+
+        scope(self);
+
+        if (auto b = Cast<AFGBuildablePipelineAttachment>(self))
+        {
+            AL_LOG("AFGBuildable::BeginPlay END %d connections", b->GetPipeConnections().Num());
+        }
+        AL_LOG("AFGBuildable::BeginPlay END");
+        });
+
     /* AFGBlueprintHologram */
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBlueprintHologram, BeginPlay, [&](auto& scope, AFGBlueprintHologram* self) {
@@ -126,11 +186,11 @@ void AutoLinkDebugging::RegisterDebugTraceHooks()
         AL_LOG("AFGBlueprintHologram::LoadBlueprintToOtherWorld END %s", *self->GetName());
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBlueprintHologram, SetupComponent, [](auto& scope, AFGBlueprintHologram* self, USceneComponent* attachParent, UActorComponent* componentTemplate, const FName& componentName, const FName& attachSocketName) {
-        AL_LOG("AFGBlueprintHologram::SetupComponent START %s (componentTemplate: %s [%s]) (attachParent: %s [%s]) attachSocketName: %s", *componentName.ToString(), *componentTemplate->GetName(), *componentTemplate->GetClass()->GetName(), *attachParent->GetName(), *attachParent->GetClass()->GetName(), *attachSocketName.ToString());
-        scope(self, attachParent, componentTemplate, componentName, attachSocketName);
-        AL_LOG("AFGBlueprintHologram::SetupComponent END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBlueprintHologram, SetupComponent, [](auto& scope, AFGBlueprintHologram* self, USceneComponent* attachParent, UActorComponent* componentTemplate, const FName& componentName, const FName& attachSocketName) {
+    //    AL_LOG("AFGBlueprintHologram::SetupComponent START %s (componentTemplate: %s [%s]) (attachParent: %s [%s]) attachSocketName: %s", *componentName.ToString(), *componentTemplate->GetName(), *componentTemplate->GetClass()->GetName(), *attachParent->GetName(), *attachParent->GetClass()->GetName(), *attachSocketName.ToString());
+    //    scope(self, attachParent, componentTemplate, componentName, attachSocketName);
+    //    AL_LOG("AFGBlueprintHologram::SetupComponent END");
+    //    });
 
     /* AFGBlueprintProxy */
 
@@ -246,6 +306,7 @@ void AutoLinkDebugging::RegisterDebugTraceHooks()
         AL_LOG("AFGBuildable::PreSerializedToBlueprint END");
         });
 
+    //Crashes
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, PostSerializedToBlueprint, [](auto& scope, AFGBuildable* self) {
     //    AL_LOG("AFGBuildable::PostSerializedToBlueprint START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
     //    scope(self);
@@ -291,6 +352,233 @@ void AutoLinkDebugging::RegisterDebugTraceHooks()
         AL_LOG("AFGBuildableSubsystem::RemovePendingConstructionHologram END");
         });
 
+    /* AFGPipeNetwork */
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, SetPipeNetworkID, [](auto& scope, AFGPipeNetwork* self, int id) {
+        AL_LOG("AFGPipeNetwork::SetPipeNetworkID START %s (%d). id: %d", *self->GetName(), self->GetPipeNetworkID(), id);
+        scope(self, id);
+        AL_LOG("AFGPipeNetwork::SetPipeNetworkID END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, AddFluidIntegrant, [](auto& scope, AFGPipeNetwork* self, class IFGFluidIntegrantInterface* fluidIntegrant) {
+        AL_LOG("AFGPipeNetwork::AddFluidIntegrant START %s (%d) Integrant: %s", *self->GetName(), self->GetPipeNetworkID(), *GetFluidIntegrantName(fluidIntegrant));
+        scope(self, fluidIntegrant);
+        AL_LOG("AFGPipeNetwork::AddFluidIntegrant END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, RemoveFluidIntegrant, [](auto& scope, AFGPipeNetwork* self, class IFGFluidIntegrantInterface* fluidIntegrant) {
+        AL_LOG("AFGPipeNetwork::RemoveFluidIntegrant START %s (%d) Integrant: %s", *self->GetName(), self->GetPipeNetworkID(), *GetFluidIntegrantName(fluidIntegrant));
+        scope(self, fluidIntegrant);
+        AL_LOG("AFGPipeNetwork::RemoveFluidIntegrant END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, MergeNetworks, [](auto& scope, AFGPipeNetwork* self, AFGPipeNetwork* network) {
+        AL_LOG("AFGPipeNetwork::MergeNetworks START %s (%d), network: %s", *self->GetName(), self->GetPipeNetworkID(), *network->GetName());
+        DumpPipeNetwork("AFGPipeNetwork::MergeNetworks BEFORE", self);
+        DumpPipeNetwork("AFGPipeNetwork::MergeNetworks BEFORE", network);
+        scope(self, network);
+        DumpPipeNetwork("AFGPipeNetwork::MergeNetworks END", self);
+        AL_LOG("AFGPipeNetwork::MergeNetworks END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, RemoveAllFluidIntegrants, [](auto& scope, AFGPipeNetwork* self) {
+        AL_LOG("AFGPipeNetwork::RemoveAllFluidIntegrants START %s (%d)", *self->GetName(), self->GetPipeNetworkID());
+        scope(self);
+        DumpPipeNetwork("AFGPipeNetwork::RemoveAllFluidIntegrants END", self);
+        AL_LOG("AFGPipeNetwork::RemoveAllFluidIntegrants END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, GetFirstFluidIntegrant, [](auto& scope, AFGPipeNetwork* self) {
+        AL_LOG("AFGPipeNetwork::GetFirstFluidIntegrant START %s (%d)", *self->GetName(), self->GetPipeNetworkID());
+        auto val = scope(self);
+        DumpPipeNetwork("AFGPipeNetwork::GetFirstFluidIntegrant END", self);
+        return val;
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, TryPropagateFluidDescriptorFrom, [](auto& scope, AFGPipeNetwork* self, AFGPipeNetwork* network) {
+        AL_LOG("AFGPipeNetwork::TryPropagateFluidDescriptorFrom START %s (%d), network: %s", *self->GetName(), self->GetPipeNetworkID(), *network->GetName());
+        scope(self, network);
+        AL_LOG("AFGPipeNetwork::TryPropagateFluidDescriptorFrom END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeNetwork, MarkForFullRebuild, [](auto& scope, AFGPipeNetwork* self) {
+        AL_LOG("AFGPipeNetwork::MarkForFullRebuild START %s", *self->GetName());
+        scope(self);
+        AL_LOG("AFGPipeNetwork::MarkForFullRebuild END");
+        });
+
+    /* AFGPipeSubsystem */
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, RegisterPipeNetwork, [](auto& scope, AFGPipeSubsystem* self, class AFGPipeNetwork* network) {
+        AL_LOG("AFGPipeSubsystem::RegisterPipeNetwork START");
+        DumpPipeNetwork("AFGPipeSubsystem::RegisterPipeNetwork", network);
+        scope(self, network);
+        AL_LOG("AFGPipeSubsystem::RegisterPipeNetwork END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, UnregisterPipeNetwork, [](auto& scope, AFGPipeSubsystem* self, class AFGPipeNetwork* network) {
+        AL_LOG("AFGPipeSubsystem::UnregisterPipeNetwork START");
+        DumpPipeNetwork("AFGPipeSubsystem::RegisterPipeNetwork", network);
+        scope(self, network);
+        AL_LOG("AFGPipeSubsystem::UnregisterPipeNetwork END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, TrySetNetworkFluidDescriptor, [](auto& scope, AFGPipeSubsystem* self, int32 networkID, TSubclassOf< class UFGItemDescriptor > fluidDescriptor) {
+        AL_LOG("AFGPipeSubsystem::TrySetNetworkFluidDescriptor START %d", networkID);
+        scope(self, networkID, fluidDescriptor);
+        AL_LOG("AFGPipeSubsystem::TrySetNetworkFluidDescriptor END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, FlushIntegrant, [](auto& scope, AFGPipeSubsystem* self, AActor* integrantActor) {
+        AL_LOG("AFGPipeSubsystem::FlushIntegrant START %s", *integrantActor->GetName());
+        scope(self, integrantActor);
+        AL_LOG("AFGPipeSubsystem::FlushIntegrant END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, FlushPipeNetwork, [](auto& scope, AFGPipeSubsystem* self, int32 networkID) {
+        AL_LOG("AFGPipeSubsystem::FlushPipeNetwork START %d", networkID);
+        scope(self, networkID);
+        AL_LOG("AFGPipeSubsystem::FlushPipeNetwork END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, FlushPipeNetworkFromIntegrant, [](auto& scope, AFGPipeSubsystem* self, AActor* integrantActor) {
+        AL_LOG("AFGPipeSubsystem::FlushPipeNetworkFromIntegrant START %s", *integrantActor->GetName());
+        scope(self, integrantActor);
+        AL_LOG("AFGPipeSubsystem::FlushPipeNetworkFromIntegrant END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, RegisterFluidIntegrant, [](auto& scope, AFGPipeSubsystem* self, IFGFluidIntegrantInterface* fluidIntegrant) {
+        AL_LOG("AFGPipeSubsystem::RegisterFluidIntegrant START %s", *GetFluidIntegrantName(fluidIntegrant));
+        scope(self, fluidIntegrant);
+        AL_LOG("AFGPipeSubsystem::RegisterFluidIntegrant END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, UnregisterFluidIntegrant, [](auto& scope, AFGPipeSubsystem* self, IFGFluidIntegrantInterface* fluidIntegrant) {
+        AL_LOG("AFGPipeSubsystem::UnregisterFluidIntegrant START %s", *GetFluidIntegrantName(fluidIntegrant));
+        scope(self, fluidIntegrant);
+        AL_LOG("AFGPipeSubsystem::UnregisterFluidIntegrant END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, RebuildPipeNetwork, [](auto& scope, AFGPipeSubsystem* self, int32 networkID) {
+        AL_LOG("AFGPipeSubsystem::RebuildPipeNetwork START %d", networkID);
+        auto network = self->FindPipeNetwork(networkID);
+        DumpPipeNetwork("AFGPipeSubsystem::RebuildPipeNetwork START", network);
+        scope(self, networkID);
+        DumpPipeNetwork("AFGPipeSubsystem::RebuildPipeNetwork END", network);
+        AL_LOG("AFGPipeSubsystem::RebuildPipeNetwork END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, MergePipeNetworks, [](auto& scope, AFGPipeSubsystem* self, int32 first, int32 second) {
+        AL_LOG("AFGPipeSubsystem::MergePipeNetworks START first: %d, second: %d", first, second);
+        scope(self, first, second);
+        AL_LOG("AFGPipeSubsystem::MergePipeNetworks END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, RemoveFluidIntegrantFromNetwork, [](auto& scope, AFGPipeSubsystem* self, IFGFluidIntegrantInterface* fluidIntegrant) {
+        AL_LOG("AFGPipeSubsystem::RemoveFluidIntegrantFromNetwork START %s", *GetFluidIntegrantName(fluidIntegrant));
+        DumpFluidIntegrant("AFGPipeSubsystem::RemoveFluidIntegrantFromNetwork", fluidIntegrant);
+        scope(self, fluidIntegrant);
+        AL_LOG("AFGPipeSubsystem::RemoveFluidIntegrantFromNetwork END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGPipeSubsystem, AddFluidIntegrantToNetwork, [](auto& scope, AFGPipeSubsystem* self, IFGFluidIntegrantInterface* fluidIntegrant, int32 networkID) {
+        AL_LOG("AFGPipeSubsystem::AddFluidIntegrantToNetwork START %s (%d)", *GetFluidIntegrantName(fluidIntegrant), networkID);
+        scope(self, fluidIntegrant, networkID);
+        AL_LOG("AFGPipeSubsystem::AddFluidIntegrantToNetwork END");
+        });
+
+    /* AFGBuildablePipelineAttachment */
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildablePipelineAttachment, BeginPlay, [](auto& scope, AFGBuildablePipelineAttachment* self) {
+        AL_LOG("AFGBuildablePipelineAttachment::BeginPlay START %s", *self->GetName());
+        AL_LOG("AFGBuildablePipelineAttachment::BeginPlay START %d connections", self->GetPipeConnections().Num());
+        scope(self);
+        AL_LOG("AFGBuildablePipelineAttachment::BeginPlay END %d connections", self->GetPipeConnections().Num());
+        AL_LOG("AFGBuildablePipelineAttachment::BeginPlay END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildablePipelineAttachment, EndPlay, [](auto& scope, AFGBuildablePipelineAttachment* self, const EEndPlayReason::Type endPlayReason) {
+        AL_LOG("AFGBuildablePipelineAttachment::EndPlay START %s", *self->GetName());
+        scope(self, endPlayReason);
+        AL_LOG("AFGBuildablePipelineAttachment::EndPlay END");
+        });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildablePipelineAttachment, GetFluidBox, [](auto& scope, AFGBuildablePipelineAttachment* self) {
+    //    AL_LOG("AFGBuildablePipelineAttachment::GetFluidBox START %s", *self->GetName());
+    //    auto val = scope(self);
+    //    AL_LOG("AFGBuildablePipelineAttachment::GetFluidBox END");
+    //    return val;
+    //    });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildablePipelineAttachment, GetPipeConnections, [&](auto& scope, AFGBuildablePipelineAttachment* self) {
+        AL_LOG("AFGBuildablePipelineAttachment::GetPipeConnections START");
+        TArray<UFGPipeConnectionComponent*> conns = scope(self);
+        AL_LOG("AFGBuildablePipelineAttachment::GetPipeConnections END");
+        return conns;
+        });
+}
+
+void AutoLinkDebugging::RegisterDebugTraceForDisabledModFunctions()
+{
+    if (AL_DEBUG_ENABLE_MOD) return;
+
+    if (!AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS) return; // At the moment, they are all build effect trace hooks
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetBeltSourceSplinesOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildableConveyorBelt*>& inBelts, TArray<AActor*>& orderedActors) {
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        int i = 0;
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE: inBelts: %d", inBelts.Num());
+        for (auto belt : inBelts)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE:\t inBelts[%d]: %s", i++, *belt->GetName());
+        }
+        auto splines = scope(self, inBelts, orderedActors);
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
+        i = 0;
+        for (auto actor : orderedActors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: Total Splines: %d", splines.Num());
+        i = 0;
+        for (USplineComponent* spline : splines)
+        {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered END");
+        return splines;
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetPipeSourceSplineOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildablePipeBase*>& inPipes, TArray<AActor*>& orderedActors) {
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        int i = 0;
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE: inPipes: %d", inPipes.Num());
+        for (auto pipe : inPipes)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE:\t inPipes[%d]: %s", i++, *pipe->GetName());
+        }
+        auto splines = scope(self, inPipes, orderedActors);
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
+        i = 0;
+        for (auto actor : orderedActors)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: Total Splines: %d", splines.Num());
+        i = 0;
+        for (USplineComponent* spline : splines)
+        {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
+        }
+        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered END");
+        return splines;
+        });
+}
+
+void AutoLinkDebugging::RegisterBuildEffectTraceHooks()
+{
+    /* AFGBuildableSubsystem */
+
     SUBSCRIBE_METHOD_AFTER(AFGBuildableSubsystem::RequestBuildEffectActor, [](UObject* WorldContext, AFGBuildEffectActor*& BuildEffectActor, TSubclassOf< AFGBuildEffectActor > TemplateClass, FTransform Transform, AActor* instigator, bool bForceSolo) {
         AL_LOG("AFGBuildableSubsystem::RequestBuildEffectActor AFTER START bForceSolo: %d", bForceSolo);
         if (TemplateClass)
@@ -304,13 +592,6 @@ void AutoLinkDebugging::RegisterDebugTraceHooks()
         DumpBuildEffectActor("AFGBuildableSubsystem::RequestBuildEffectActor RESULT", BuildEffectActor);
         AL_LOG("AFGBuildableSubsystem::RequestBuildEffectActor AFTER END");
         });
-
-    /* AFGBlueprintSubsystem */
-    //SUBSCRIBE_UOBJECT_METHOD(AFGBlueprintSubsystem, Tick, [](auto& scope, AFGBlueprintSubsystem* self, float dt) {
-    //    AL_LOG("AFGBlueprintSubsystem::Tick START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-    //    scope(self, dt);
-    //    AL_LOG("AFGBlueprintSubsystem::Tick END");
-    //    });
 
     /* AFGBuildEffectActor */
 
@@ -361,11 +642,11 @@ void AutoLinkDebugging::RegisterDebugTraceHooks()
     //    AL_LOG("AFGBuildEffectActor::GetBind AFTER START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, SpawnCostEffectActor, [](auto& scope, AFGBuildEffectActor* self, const FTransform& SpawnLocation, FVector TargetLocation, float TargetExtent, TSubclassOf<UFGItemDescriptor> Item) {
-        AL_LOG("AFGBuildEffectActor::SpawnCostEffectActor START %s (%s). Spawn At: %s. Target: %s", *self->GetName(), *self->GetClass()->GetName(), *SpawnLocation.ToString(), *TargetLocation.ToString());
-        scope(self, SpawnLocation, TargetLocation, TargetExtent, Item);
-        AL_LOG("AFGBuildEffectActor::SpawnCostEffectActor END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, SpawnCostEffectActor, [](auto& scope, AFGBuildEffectActor* self, const FTransform& SpawnLocation, FVector TargetLocation, float TargetExtent, TSubclassOf<UFGItemDescriptor> Item) {
+    //    AL_LOG("AFGBuildEffectActor::SpawnCostEffectActor START %s (%s). Spawn At: %s. Target: %s", *self->GetName(), *self->GetClass()->GetName(), *SpawnLocation.ToString(), *TargetLocation.ToString());
+    //    scope(self, SpawnLocation, TargetLocation, TargetExtent, Item);
+    //    AL_LOG("AFGBuildEffectActor::SpawnCostEffectActor END");
+    //    });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, Start, [](auto& scope, AFGBuildEffectActor* self) {
         AL_LOG("AFGBuildEffectActor::Start START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
@@ -410,12 +691,12 @@ void AutoLinkDebugging::RegisterDebugTraceHooks()
     //    AL_LOG("AFGBuildEffectActor::GetTotalSplineLength END");
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetTransformOnSplines, [](auto& scope, const AFGBuildEffectActor* self, bool bWorldSpace) {
-        AL_LOG("AFGBuildEffectActor::GetTransformOnSplines START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto transform = scope(self, bWorldSpace);
-        AL_LOG("AFGBuildEffectActor::GetTransformOnSplines END Transform: %s", *transform.ToString() );
-        return transform;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetTransformOnSplines, [](auto& scope, const AFGBuildEffectActor* self, bool bWorldSpace) {
+    //    AL_LOG("AFGBuildEffectActor::GetTransformOnSplines START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto transform = scope(self, bWorldSpace);
+    //    AL_LOG("AFGBuildEffectActor::GetTransformOnSplines END Transform: %s", *transform.ToString() );
+    //    return transform;
+    //    });
 
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, UpdateCostQueue, [](auto& scope, AFGBuildEffectActor* self) {
     //    AL_LOG("AFGBuildEffectActor::UpdateCostQueue START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
@@ -431,80 +712,6 @@ void AutoLinkDebugging::RegisterDebugTraceHooks()
         AL_LOG("AFGBuildEffectActor::CalculateBuildEffectBounds END");
         });
 
-    if (!AL_DEBUG_ENABLE_MOD)
-    {
-        SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetBeltSourceSplinesOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildableConveyorBelt*>& inBelts, TArray<AActor*>& orderedActors) {
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-            int i = 0;
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE: inBelts: %d", inBelts.Num());
-            for (auto belt : inBelts)
-            {
-                AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE:\t inBelts[%d]: %s", i++, *belt->GetName());
-            }
-            auto splines = scope(self, inBelts, orderedActors);
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
-            i = 0;
-            for (auto actor : orderedActors)
-            {
-                AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
-            }
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: Total Splines: %d", splines.Num());
-            i = 0;
-            for (USplineComponent* spline : splines)
-            {
-                AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
-            }
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered END");
-            return splines;
-            });
-
-        SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetPipeSourceSplineOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildablePipeBase*>& inPipes, TArray<AActor*>& orderedActors) {
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-            int i = 0;
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE: inPipes: %d", inPipes.Num());
-            for (auto pipe : inPipes)
-            {
-                AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE:\t inPipes[%d]: %s", i++, *pipe->GetName());
-            }
-            auto splines = scope(self, inPipes, orderedActors);
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
-            i = 0;
-            for (auto actor : orderedActors)
-            {
-                AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
-            }
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: Total Splines: %d", splines.Num());
-            i = 0;
-            for (USplineComponent* spline : splines)
-            {
-                AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
-            }
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered END");
-            return splines;
-            });
-    }
-
-    /* UActorComponent */
-
-    //SUBSCRIBE_METHOD_EXPLICIT(AActor*(UActorComponent::*)() const, UActorComponent::GetOwner, [](auto& scope, const UActorComponent* self) {
-    //    //AL_LOG("UActorComponent::GetOwner START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-    //    auto owner = scope(self);
-    //    if (IsValid(owner))
-    //    {
-    //        AL_LOG("UActorComponent::GetOwner END Owner: %s", *owner->GetName());
-    //    }
-    //    return owner;
-    //    });
-
-    /* UFGPipeConnectionComponentBase */
-
-    // This is force inline so they won't trace from C++ but maybe from blueprints...
-    SUBSCRIBE_UOBJECT_METHOD(UFGPipeConnectionComponentBase, GetConnection, [](auto& scope, const UFGPipeConnectionComponentBase* self) {
-        AL_LOG("UFGPipeConnectionComponentBase::GetConnection START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto val = scope(self);
-        AL_LOG("UFGPipeConnectionComponentBase::GetConnection END");
-        return val;
-        });
 }
 
 void AutoLinkDebugging::DumpConnection(FString prefix, UFGFactoryConnectionComponent* c)
@@ -606,35 +813,7 @@ void AutoLinkDebugging::DumpConnection(FString prefix, UFGPipeConnectionComponen
     }
 
     AL_LOG("%s:\t\t HasFluidIntegrant: %d", *prefix, c->HasFluidIntegrant());
-    if (c->mFluidIntegrant)
-    {
-        if (auto actor = Cast<AActor>(c->mFluidIntegrant))
-        {
-            AL_LOG("%s:\t\t mFluidIntegrant: %s (%s) at %x", *prefix, *actor->GetName(), *actor->GetClass()->GetName(), actor);
-        }
-        else
-        {
-            AL_LOG("%s:\t\t mFluidIntegrant: %x", *prefix, c->mFluidIntegrant);
-        }
-
-        int i = 0;
-        for (auto con : c->mFluidIntegrant->GetPipeConnections())
-        {
-            if (con)
-            {
-                AL_LOG("%s:\t\t\t mFluidIntegrant connection %d: %s at %x", *prefix, i, *con->GetName(), con);
-            }
-            else
-            {
-                AL_LOG("%s:\t\t\t mFluidIntegrant connetion %d: null", *prefix, i);
-            }
-            ++i;
-        }
-    }
-    else
-    {
-        AL_LOG("%s:\t\t mFluidIntegrant: null", *prefix);
-    }
+    AL_LOG("%s:\t\t mFluidIntegrant: %s at %x", *prefix, *GetFluidIntegrantName( c->mFluidIntegrant ), c->mFluidIntegrant);
 }
 
 void AutoLinkDebugging::DumpFluidIntegrant(FString prefix, IFGFluidIntegrantInterface* f)
@@ -707,5 +886,23 @@ void AutoLinkDebugging::DumpBuildEffectActor(FString prefix, const AFGBuildEffec
     for (auto& pActor : b->mSourceActors)
     {
         AL_LOG("%s:\t\t mSourceActor[%d]: %s (%s)", *prefix, i++, *pActor->GetName(), *pActor->GetClass()->GetName());
+    }
+}
+
+void AutoLinkDebugging::DumpPipeNetwork(FString prefix, const AFGPipeNetwork* p)
+{
+    if (!p)
+    {
+        AL_LOG("%s: AFGPipeNetwork is null", *prefix);
+        return;
+    }
+
+    AL_LOG("%s:\t AFGPipeNetwork is %s with ID %d", *prefix, *p->GetName(), p->GetPipeNetworkID());
+    AL_LOG("%s:\t NumFluidIntegrants %d", *prefix, p->NumFluidIntegrants());
+
+    int i = 0;
+    for (auto in : p->mFluidIntegrants)
+    {
+        AL_LOG("%s:\t\t mFluidIntegrants[%d]: %s", *prefix, i++, *GetFluidIntegrantName(in));
     }
 }

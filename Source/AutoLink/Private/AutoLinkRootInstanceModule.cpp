@@ -16,6 +16,7 @@
 #include "FGBuildablePipeHyper.h"
 #include "FGBuildablePipeline.h"
 #include "FGBuildablePipelineAttachment.h"
+#include "FGBuildablePipelineJunction.h"
 #include "FGBuildablePoleBase.h"
 #include "FGBuildablePowerPole.h"
 #include "FGBuildableRailroadTrack.h"
@@ -58,7 +59,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
 
     if (AL_DEBUG_ENABLED)
     {
-        RegisterDebugHooks();
+        AutoLinkDebugging::RegisterDebugHooks();
 
         if(!AL_DEBUG_ENABLE_MOD)
         {
@@ -103,21 +104,24 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
             SHORT_CIRCUIT_TYPE(AFGConveyorAttachmentHologram);
             SHORT_CIRCUIT_TYPE(AFGPipeHyperAttachmentHologram);
             SHORT_CIRCUIT_TYPE(AFGPipelineAttachmentHologram);
-
             AL_LOG("AFGBuildableHologram::ConfigureComponents: The hologram is %s and buildable is %s at %s", *hologram->GetName(), *buildable->GetName(), *buildable->GetActorLocation().ToString());
+
             FindAndLinkForBuildable(buildable);
         });
 #undef SHORT_CIRCUIT_TYPE
 
-#define SUBSCRIBE_CONFIGURE_COMPONENTS( T )\
+#define SUBSCRIBE_CONFIGURE_COMPONENTS_BASE( T, PRE_CALL )\
     SUBSCRIBE_METHOD_VIRTUAL_AFTER(\
         T::ConfigureComponents,\
         GetMutableDefault<T>(),\
         [](const T* hologram, AFGBuildable* buildable)\
         {\
             AL_LOG(#T "::ConfigureComponents: The hologram is %s and buildable is %s at %s", *hologram->GetName(), *buildable->GetName(), *buildable->GetActorLocation().ToString());\
+            PRE_CALL;\
             FindAndLinkForBuildable(buildable);\
         });
+
+#define SUBSCRIBE_CONFIGURE_COMPONENTS( T ) SUBSCRIBE_CONFIGURE_COMPONENTS_BASE( T, {} )
 
     // Note that we don't subscribe to the overridden versions on:
     //  - AFGConveyorBeltHologram
@@ -129,7 +133,18 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
     // Because they either don't have auto-linkable connections or handle their own snapping/connecting just fine
     SUBSCRIBE_CONFIGURE_COMPONENTS(AFGConveyorAttachmentHologram);
     SUBSCRIBE_CONFIGURE_COMPONENTS(AFGPipeHyperAttachmentHologram);
-    SUBSCRIBE_CONFIGURE_COMPONENTS(AFGPipelineAttachmentHologram);
+    SUBSCRIBE_CONFIGURE_COMPONENTS_BASE(AFGPipelineAttachmentHologram,
+        {
+            if (auto junction = Cast<AFGBuildablePipelineJunction>(buildable))
+            {
+                if (junction->GetPipeConnections().Num() == 0)
+                {
+                    AL_LOG("AFGPipelineAttachmentHologram::ReceiveConfigureComponents: AFGBuildablePipelineJunction has no pipe connections yet. Adding them with GetComponents.");
+                    junction->GetComponents<UFGPipeConnectionComponent>(junction->mPipeConnections);
+                }
+            }
+        });
+
 #undef SUBSCRIBE_CONFIGURE_COMPONENTS
 
     // When the build effect actor scans the belts and pipes of a blueprint to determine what build effects to run via GetBeltSourceSplinesOrdered and
@@ -144,11 +159,11 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
     // We could instead implement a custom version of these functions but that is much more complex and would be far more vulnerable to breaking with game updates
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetBeltSourceSplinesOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildableConveyorBelt*>& inBelts, TArray<AActor*>& orderedActors) {
-        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
         int i = 0;
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
             AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE: inBelts: %d", inBelts.Num());
             for (auto belt : inBelts)
             {
@@ -159,7 +174,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
         TArray<AActor*> actors;
         auto splines = scope(self, inBelts, actors);
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
             AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER: actors: %d", actors.Num());
             i = 0;
@@ -178,7 +193,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
         splines = splines.FilterByPredicate([&](USplineComponent* spline) { return inBelts.Contains(spline->GetOwner()); });
         auto filteredActors = actors.FilterByPredicate([&](AActor* actor) { return inBelts.Contains(actor); });
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
             AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: filteredActors: %d", actors.Num());
             i = 0;
@@ -190,7 +205,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
 
         orderedActors.Append(filteredActors);
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
             AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
             i = 0;
@@ -204,19 +219,19 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
             {
                 AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
             }
+            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered END");
         }
 
-        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered END");
         scope.Override(splines);
         return splines;
         });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetPipeSourceSplineOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildablePipeBase*>& inPipes, TArray<AActor*>& orderedActors) {
-        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
         int i = 0;
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
             AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE: inPipes: %d", inPipes.Num());
             for (auto pipe : inPipes)
             {
@@ -227,7 +242,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
         TArray<AActor*> actors;
         auto splines = scope(self, inPipes, actors);
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
             AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER: actors: %d", actors.Num());
             i = 0;
@@ -246,7 +261,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
         splines = splines.FilterByPredicate([&](USplineComponent* spline) { return inPipes.Contains(spline->GetOwner()); });
         auto filteredActors = actors.FilterByPredicate([&](AActor* actor) { return inPipes.Contains(actor); });
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
             AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: filteredActors: %d", actors.Num());
             i = 0;
@@ -258,7 +273,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
 
         orderedActors.Append(filteredActors);
 
-        if (AL_DEBUG_ENABLED)
+        if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
         {
             AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
             i = 0;
@@ -272,25 +287,14 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
             {
                 AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
             }
+            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered END");
         }
 
-        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered END");
         scope.Override(splines);
         return splines;
         });
 
     Super::DispatchLifecycleEvent(phase);
-}
-
-void UAutoLinkRootInstanceModule::RegisterDebugHooks()
-{
-    if (!AL_DEBUG_ENABLED) return;
-
-    AutoLinkDebugging::RegisterDebugHooks();
-
-#if AL_REGISTER_DEBUG_TRACE_HOOKS
-    AutoLinkDebugging::RegisterDebugTraceHooks();
-#endif
 }
 
 bool UAutoLinkRootInstanceModule::ShouldTryToAutoLink(AFGBuildable* buildable)
@@ -372,23 +376,32 @@ void UAutoLinkRootInstanceModule::FindAndLinkForBuildable(AFGBuildable* buildabl
 
     // Pipe connections
     {
-        TInlineComponentArray<UFGPipeConnectionComponent*> openConnections;
-        FindOpenFluidConnections(openConnections, buildable);
-        AL_LOG("FindAndLinkForBuildable: Found %d open fluid connections", openConnections.Num());
-        TSet< IFGFluidIntegrantInterface* > integrantsToRegister;
-        for (auto connection : openConnections)
+        // The base game has no way to directly link pipe junctions to pipe junctions. To preserve this,
+        // we do not allow pipe junctions to autolink to pipe junctions, though they seem to work.
+        TArray<UClass*> incompatibleFluidClasses = TArray<UClass*>();
+        if (buildable->IsA(AFGBuildablePipelineJunction::StaticClass()))
         {
-            if (FindAndLinkCompatibleFluidConnection(connection))
+            incompatibleFluidClasses.Add(AFGBuildablePipelineJunction::StaticClass());
+        }
+
+        TInlineComponentArray<TPair<UFGPipeConnectionComponent*, IFGFluidIntegrantInterface*>> openConnectionsAndIntegrants;
+        FindOpenFluidConnections(openConnectionsAndIntegrants, buildable);
+        AL_LOG("FindAndLinkForBuildable: Found %d open fluid connections", openConnectionsAndIntegrants.Num());
+        TSet< IFGFluidIntegrantInterface* > integrantsToRegister;
+        for (auto& connectionAndIntegrant : openConnectionsAndIntegrants)
+        {
+            auto connection = connectionAndIntegrant.Key;
+            auto integrant = connectionAndIntegrant.Value;
+
+            if (!connection->HasFluidIntegrant())
             {
-                if (connection->HasFluidIntegrant())
-                {
-                    AL_LOG("FindAndLinkForBuildable: Connection %s (%s) has a fluid integrant", *connection->GetName(), *connection->GetClass()->GetName());
-                    integrantsToRegister.Add(connection->GetFluidIntegrant());
-                }
-                else
-                {
-                    AL_LOG("FindAndLinkForBuildable: Connection %s (%s) has NO fluid integrant", *connection->GetName(), *connection->GetClass()->GetName());
-                }
+                connection->SetFluidIntegrant(integrant);
+            }
+
+            if (FindAndLinkCompatibleFluidConnection(connection, incompatibleFluidClasses))
+            {
+                AL_LOG("FindAndLinkForBuildable: Saving fluid integrant to register for %s (%s)", *connection->GetName(), *connection->GetClass()->GetName());
+                integrantsToRegister.Add(integrant);
             }
         }
 
@@ -398,6 +411,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkForBuildable(AFGBuildable* buildabl
             auto pipeSubsystem = AFGPipeSubsystem::GetPipeSubsystem(buildable->GetWorld());
             for (auto integrant : integrantsToRegister)
             {
+                AL_LOG("FindAndLinkForBuildable: Registering fluid integrant %s", *AutoLinkDebugging::GetFluidIntegrantName(integrant));
                 pipeSubsystem->RegisterFluidIntegrant(integrant);
             }
         }
@@ -481,21 +495,18 @@ void UAutoLinkRootInstanceModule::FindOpenBeltConnections(TInlineComponentArray<
     }
 }
 
-void UAutoLinkRootInstanceModule::AddIfCandidate(
-    TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
-    UFGPipeConnectionComponent* connection,
-    IFGFluidIntegrantInterface* owningFluidIntegrant)
+bool UAutoLinkRootInstanceModule::IsCandidate( UFGPipeConnectionComponent* connection)
 {
     if (!connection)
     {
         AL_LOG("\tAddIfCandidate: UFGPipeConnectionComponent is null");
-        return;
+        return false;
     }
 
     if (connection->IsConnected())
     {
         AL_LOG("\tAddIfCandidate: UFGPipeConnectionComponent %s (%s) is already connected to %s", *connection->GetName(), *connection->GetClass()->GetName(), *connection->GetConnection()->GetName());
-        return;
+        return false;
     }
 
     switch (connection->GetPipeConnectionType())
@@ -506,22 +517,26 @@ void UAutoLinkRootInstanceModule::AddIfCandidate(
         break;
     default:
         AL_LOG("\tAddIfCandidate: UFGPipeConnectionComponent connection type is %d, which doesn't actually connect to entities in the world.", connection->GetPipeConnectionType());
-        return;
+        return false;
     }
 
-    if (!connection->HasFluidIntegrant())
+    return true;
+}
+
+void UAutoLinkRootInstanceModule::AddIfCandidate(
+    TInlineComponentArray<TPair<UFGPipeConnectionComponent*, IFGFluidIntegrantInterface*>>& openConnectionsAndIntegrants,
+    UFGPipeConnectionComponent* connection,
+    IFGFluidIntegrantInterface* owningFluidIntegrant)
+{
+    if (IsCandidate(connection))
     {
-        AL_LOG("\tAddIfCandidate: UFGPipeConnectionComponent %s (%s) has no fluid integrant, so setting it to its owner", *connection->GetName(), *connection->GetClass()->GetName());
-        // This often isn't set when it it logically should be. Tests haven't shown any harm in setting it and
-        // this passes it up to the caller so it can do fluid integrant management if something needs to be linked.
-        connection->SetFluidIntegrant(owningFluidIntegrant);
+        openConnectionsAndIntegrants.Add(
+            TPair<UFGPipeConnectionComponent*, IFGFluidIntegrantInterface*>(connection, owningFluidIntegrant));
     }
-
-    openConnections.Add(connection);
 }
 
 void UAutoLinkRootInstanceModule::FindOpenFluidConnections(
-    TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
+    TInlineComponentArray<TPair<UFGPipeConnectionComponent*,IFGFluidIntegrantInterface*>>& openConnectionsAndIntegrants,
     AFGBuildable* buildable)
 {
     // Start with special cases where we know to get the connections without a full scan
@@ -529,15 +544,17 @@ void UAutoLinkRootInstanceModule::FindOpenFluidConnections(
     {
         AL_LOG("FindOpenFluidConnections: AFGBuildablePipeline %s", *pipeline->GetName());
 
-        AddIfCandidate(openConnections, pipeline->GetPipeConnection0(), pipeline);
-        AddIfCandidate(openConnections, pipeline->GetPipeConnection1(), pipeline);
+        AddIfCandidate(openConnectionsAndIntegrants, pipeline->GetPipeConnection0(), pipeline);
+        AddIfCandidate(openConnectionsAndIntegrants, pipeline->GetPipeConnection1(), pipeline);
     }
     else if (auto fluidIntegrant = Cast<IFGFluidIntegrantInterface>(buildable))
     {
-        AL_LOG("FindOpenFluidConnections: IFGFluidIntegrantInterface %s", *buildable->GetName());
-        for (auto connection : fluidIntegrant->GetPipeConnections())
+        auto pipeConnections = fluidIntegrant->GetPipeConnections();
+        AL_LOG("FindOpenFluidConnections: IFGFluidIntegrantInterface %s has %d total pipe connections", *buildable->GetName(), pipeConnections.Num());
+
+        for (auto connection : pipeConnections)
         {
-            AddIfCandidate(openConnections, connection, fluidIntegrant);
+            AddIfCandidate(openConnectionsAndIntegrants, connection, fluidIntegrant);
         }
     }
     else
@@ -547,10 +564,11 @@ void UAutoLinkRootInstanceModule::FindOpenFluidConnections(
         {
             if (auto integrant = Cast<IFGFluidIntegrantInterface>(component))
             {
-                AL_LOG("FindOpenFluidConnections:\tHas an IFGFluidIntegrantInterface component %s of type %s", *component->GetName(), *component->GetClass()->GetName());
-                for (auto connection : integrant->GetPipeConnections())
+                auto pipeConnections = integrant->GetPipeConnections();
+                AL_LOG("FindOpenFluidConnections:\tHas an IFGFluidIntegrantInterface component %s of type %s with %d total pipe connections", *component->GetName(), *component->GetClass()->GetName(), pipeConnections.Num());
+                for (auto connection : pipeConnections)
                 {
-                    AddIfCandidate(openConnections, connection, integrant);
+                    AddIfCandidate(openConnectionsAndIntegrants, connection, integrant);
                 }
             }
         }
@@ -1127,7 +1145,9 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
     AL_LOG("FindAndLinkCompatibleRailroadConnection: No compatible connection found");
 }
 
-bool UAutoLinkRootInstanceModule::FindAndLinkCompatibleFluidConnection(UFGPipeConnectionComponent* connectionComponent)
+bool UAutoLinkRootInstanceModule::FindAndLinkCompatibleFluidConnection(
+    UFGPipeConnectionComponent* connectionComponent,
+    const TArray<UClass*>& incompatibleClasses)
 {
     if (connectionComponent->IsConnected())
     {
@@ -1157,13 +1177,27 @@ bool UAutoLinkRootInstanceModule::FindAndLinkCompatibleFluidConnection(UFGPipeCo
     {
         if (auto buildable = Cast<AFGBuildable>(actor))
         {
-            AL_LOG("FindAndLinkCompatibleFluidConnection: Examining hit result actor %s of type %s", *buildable->GetName(), *buildable->GetClass()->GetName());
-            TInlineComponentArray<UFGPipeConnectionComponent*> openConnections;
-            FindOpenFluidConnections(openConnections, buildable);
+            AL_LOG( "FindAndLinkCompatibleFluidConnection: Examining hit result actor %s of type %s", *buildable->GetName(), *buildable->GetClass()->GetName());
 
-            for (auto openConnection : openConnections)
+            auto actorIsCompatible = true;
+            for(auto incompatibleClass : incompatibleClasses)
             {
-                candidates.Add(openConnection);
+                if (buildable->IsA(incompatibleClass))
+                {
+                    AL_LOG("FindAndLinkCompatibleFluidConnection: Skipping hit result because it is an instance of incompatible class %s", *incompatibleClass->GetName());
+                    actorIsCompatible = false;
+                    break;
+                }
+            }
+
+            if (!actorIsCompatible) continue;
+
+            TInlineComponentArray<TPair<UFGPipeConnectionComponent*, IFGFluidIntegrantInterface*>> openConnectionsAndIntegrants;
+            FindOpenFluidConnections(openConnectionsAndIntegrants, buildable);
+
+            for (auto& openConnectionAndIntegrant : openConnectionsAndIntegrants)
+            {
+                candidates.Add(openConnectionAndIntegrant.Key);
             }
         }
         else
@@ -1223,6 +1257,7 @@ bool UAutoLinkRootInstanceModule::FindAndLinkCompatibleHyperConnection(UFGPipeCo
 bool UAutoLinkRootInstanceModule::ConnectBestPipeCandidate(UFGPipeConnectionComponentBase* connectionComponent, TArray<UFGPipeConnectionComponentBase*>& candidates)
 {
     auto connectorLocation = connectionComponent->GetConnectorLocation();
+    auto connectionFluidComponent = Cast<UFGPipeConnectionComponent>(connectionComponent);
     for (auto candidateConnection : candidates)
     {
         AL_LOG("ConnectBestPipeCandidate: Examining connection candidate: %s (%s) at %s (%f units away). Connection type %d",
@@ -1238,9 +1273,9 @@ bool UAutoLinkRootInstanceModule::ConnectBestPipeCandidate(UFGPipeConnectionComp
             continue;
         }
 
-        if (candidateConnection->IsConnected())
+        if (!connectionComponent->CanConnectTo(candidateConnection))
         {
-            AL_LOG("ConnectBestPipeCandidate:\tAlready connected!");
+            AL_LOG("ConnectBestPipeCandidate:\tCannot connect to candidate!");
             continue;
         }
 
@@ -1259,7 +1294,6 @@ bool UAutoLinkRootInstanceModule::ConnectBestPipeCandidate(UFGPipeConnectionComp
         // for us to link them so we just make double sure of that here.
         const FVector otherLocation = candidateConnection->GetConnectorLocation();
         const float distanceSq = FVector::DistSquared(otherLocation, connectorLocation);
-
         if (distanceSq > 1) // Anything more than a 1 cm away is too far (and most are even much closer, based on my tests)
         {
             AL_LOG("ConnectBestPipeCandidate:\tConnection is too far away to be auto-linked!");
@@ -1267,6 +1301,7 @@ bool UAutoLinkRootInstanceModule::ConnectBestPipeCandidate(UFGPipeConnectionComp
         }
 
         AL_LOG("ConnectBestPipeCandidate:\tFound one that's extremely close; taking it as the best result. Location: %s", *otherLocation.ToString());
+
         candidateConnection->SetConnection(connectionComponent);
         return true;
     }

@@ -24,34 +24,34 @@ public:
     ~UAutoLinkRootInstanceModule();
 
     virtual void DispatchLifecycleEvent(ELifecyclePhase phase) override;
-    void RegisterDebugHooks();
 
     static bool ShouldTryToAutoLink(AFGBuildable* buildable);
     static void FindAndLinkForBuildable(AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfCandidate(
+    static void AddIfCandidate(
         TInlineComponentArray<UFGFactoryConnectionComponent*>& openConnections,
         UFGFactoryConnectionComponent* connection);
     static void FindOpenBeltConnections(
         TInlineComponentArray<UFGFactoryConnectionComponent*>& openConnections,
         AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfCandidate(
-        TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
+    static bool IsCandidate(UFGPipeConnectionComponent* connection);
+    static void AddIfCandidate(
+        TInlineComponentArray<TPair<UFGPipeConnectionComponent*, IFGFluidIntegrantInterface*>>& openConnectionsAndIntegrants,
         UFGPipeConnectionComponent* connection,
         IFGFluidIntegrantInterface* owningFluidIntegrant);
     static void FindOpenFluidConnections(
-        TInlineComponentArray<UFGPipeConnectionComponent*>& openConnections,
+        TInlineComponentArray<TPair<UFGPipeConnectionComponent*, IFGFluidIntegrantInterface*>>& openConnectionsAndIntegrants,
         AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfCandidate(
+    static void AddIfCandidate(
         TInlineComponentArray<UFGPipeConnectionComponentHyper*>& openConnections,
         UFGPipeConnectionComponentHyper* connection);
     static void FindOpenHyperConnections(
         TInlineComponentArray<UFGPipeConnectionComponentHyper*>& openConnections,
         AFGBuildable* buildable);
 
-    static void FORCEINLINE AddIfCandidate(
+    static void AddIfCandidate(
         TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections,
         UFGRailroadTrackConnectionComponent* connection);
     static void FindOpenRailroadConnections(
@@ -78,7 +78,7 @@ public:
     static void FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent);
 
     // These functions return true if it found and connected something
-    static bool FindAndLinkCompatibleFluidConnection(UFGPipeConnectionComponent* connectionComponent);
+    static bool FindAndLinkCompatibleFluidConnection(UFGPipeConnectionComponent* connectionComponent, const TArray<UClass*>& incompatibleClasses);
     static bool FindAndLinkCompatibleHyperConnection(UFGPipeConnectionComponentHyper* connectionComponent);
     static bool ConnectBestPipeCandidate(UFGPipeConnectionComponentBase* connectionComponent, TArray<UFGPipeConnectionComponentBase*>& candidates);
 };
