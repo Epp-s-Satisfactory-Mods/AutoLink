@@ -107,6 +107,33 @@ void AutoLinkLinuxHooking::CreateVisualsCustom(AFGBuildEffectActor* self)
         sourceSplines.Append(self->GetBeltSourceSplinesOrdered(BeltSplineActors, OutSplineBuildings));
         sourceSplines.Append(self->GetPipeSourceSplineOrdered(PipeSplineActors, OutSplineBuildings));
 
+        /* BEGIN AUTOLINK FIX */
+
+        /* The Get*SourceSplinesOrdered functions can follow links to outside of the build effect actor. Our hackey fix is
+        to use the complete CreateVisuals from the game (huge thanks to Archengius on the Satisfactory Modding Discord) but
+        insert code here to simply remove any actors that are not already tracked by the build effect actor.
+
+        See AutoLinkWindowsHooking.cpp for a more detailed explanation of what/why.  But we have to do it like this on Linux
+        instead of the way we do it on Windows because Linux crashes on any construction when you try to hook GetBeltSourceSplinesOrdered */
+
+        AL_LOG("BEGIN CUSTOM AUTOLINK CREATEVISUALS FIX")
+
+        sourceSplines = sourceSplines.FilterByPredicate(
+            [&](USplineComponent* spline)
+            {
+                return BeltSplineActors.Contains(spline->GetOwner()) || PipeSplineActors.Contains(spline->GetOwner());
+            });
+
+        OutSplineBuildings = OutSplineBuildings.FilterByPredicate(
+            [&](AActor* actor)
+            {
+                return BeltSplineActors.Contains(actor) || PipeSplineActors.Contains(actor);
+            });
+
+        AL_LOG("END CUSTOM AUTOLINK CREATEVISUALS FIX")
+
+        /* END AUTOLINK FIX */
+
         int32 Index = 0;
         for (AActor* sourceActor : OutSplineBuildings)
         {
