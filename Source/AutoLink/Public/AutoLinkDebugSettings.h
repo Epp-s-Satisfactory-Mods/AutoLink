@@ -7,8 +7,14 @@
 // Whether to enable mod functionality. Useful to disable mod while inspecting defualt functionality.
 #define AL_DEBUG_ENABLE_MOD (!AL_DEBUG_ENABLED || 1)
 
-// Whether to enable trace hooks for analysis
-#define AL_REGISTER_DEBUG_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)
+// Whether to enable general trace hooks for analysis
+#define AL_REGISTER_GENERAL_DEBUG_TRACE_HOOKS (AL_DEBUG_ENABLED && 1)
 
 // Whether to enable build effect trace hooks for analysis
-#define AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS (AL_DEBUG_ENABLED && AL_REGISTER_DEBUG_TRACE_HOOKS && 0)
+#define AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)
+
+// Whether to enable rail trace hooks for analysis
+#define AL_REGISTER_RAIL_TRACE_HOOKS (AL_DEBUG_ENABLED && 1)
+
+// Whether to enable pipe trace hooks for analysis
+#define AL_REGISTER_PIPE_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)

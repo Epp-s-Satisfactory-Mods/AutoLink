@@ -73,11 +73,11 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
     SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGBlueprintHologram::Construct, GetMutableDefault<AFGBlueprintHologram>(),
         [](AActor* returnValue, AFGBlueprintHologram* hologram, TArray< AActor* >& out_children, FNetConstructionID NetConstructionID)
         {
-            AL_LOG("AFGBlueprintHologram::Construct: The hologram is %s", *hologram->GetName());
+            AL_LOG("AFGBlueprintHologram::Construct AFTER: The hologram is %s", *hologram->GetName());
 
             for (auto child : out_children)
             {
-                AL_LOG("AFGBlueprintHologram::Construct: Child %s (%s) at %s",
+                AL_LOG("AFGBlueprintHologram::Construct AFTER: Child %s (%s) at %s",
                     *child->GetName(),
                     *child->GetClass()->GetName(),
                     *child->GetActorLocation().ToString());
@@ -88,7 +88,7 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
                 }
             }
 
-            AL_LOG("AFGBlueprintHologram::Construct: Return value %s (%s) at %s",
+            AL_LOG("AFGBlueprintHologram::Construct AFTER: Return value %s (%s) at %s",
                 *returnValue->GetName(),
                 *returnValue->GetClass()->GetName(),
                 *returnValue->GetActorLocation().ToString());
@@ -1138,7 +1138,15 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         }
 
         AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close; so we're linking it. Location: %s", *candidateLocation.ToString());
+
         connectionComponent->AddConnection(candidateConnection);
+        auto candidateGraphID = candidateConnection->GetTrack()->GetTrackGraphID();
+        if (candidateGraphID != INDEX_NONE)
+        {
+            auto subsystem = AFGRailroadSubsystem::Get(connectionComponent->GetWorld());
+            subsystem->AddTrackToGraph(connectionComponent->GetTrack(), candidateGraphID);
+        }
+
         // We don't break here - keep linking because railroads can be connected to multiple other railoads at junctions.
     }
 
