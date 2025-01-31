@@ -14,7 +14,7 @@
 #define AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)
 
 // Whether to enable rail trace hooks for analysis
-#define AL_REGISTER_RAIL_TRACE_HOOKS (AL_DEBUG_ENABLED && 1)
+#define AL_REGISTER_RAIL_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)
 
 // Whether to enable pipe trace hooks for analysis
-#define AL_REGISTER_PIPE_TRACE_HOOKS (AL_DEBUG_ENABLED && 1)
+#define AL_REGISTER_PIPE_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)

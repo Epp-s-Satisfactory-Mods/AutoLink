@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 0,
-	"VersionName": "0.6.0",
+	"VersionName": "0.6.1",
 	"FriendlyName": "AutoLink",
 	"Description": "Blueprints can tile and structures automatically hook up to all incoming/outgoing connections.",
 	"Category": "Modding",
@@ -25,7 +25,7 @@
 		{
 			"Name": "SML",
 			"Enabled": true,
-			"SemVersion": "^3.9.0"
+			"SemVersion": "^3.9.1"
 		},
 		{
 			"Name": "AbstractInstance",
@@ -33,6 +33,6 @@
 			"BasePlugin": true
 		}
 	],
-	"SemVersion": "0.6.0",
+	"SemVersion": "0.6.1",
 	"GameVersion": ">=383729"
 }

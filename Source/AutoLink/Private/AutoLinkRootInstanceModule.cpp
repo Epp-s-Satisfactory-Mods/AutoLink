@@ -1142,12 +1142,6 @@ bool UAutoLinkRootInstanceModule::ConnectBestPipeCandidate(UFGPipeConnectionComp
             continue;
         }
 
-        if (!connectionComponent->CanConnectTo(candidateConnection))
-        {
-            AL_LOG("ConnectBestPipeCandidate:\tCannot connect to candidate!");
-            continue;
-        }
-
         // Determine if the connections components are aligned
         const FVector connectorNormal = connectionComponent->GetConnectorNormal();
         const FVector crossProduct = FVector::CrossProduct(connectorNormal, candidateConnection->GetConnectorNormal());
