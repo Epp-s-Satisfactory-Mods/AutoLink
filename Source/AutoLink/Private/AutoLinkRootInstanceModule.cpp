@@ -22,7 +22,9 @@
 #include "FGBuildablePoleBase.h"
 #include "FGBuildablePowerPole.h"
 #include "FGBuildableRailroadTrack.h"
+#include "FGBuildableStorage.h"
 #include "FGBuildableSubsystem.h"
+#include "FGCentralStorageContainer.h"
 #include "FGConveyorAttachmentHologram.h"
 #include "FGFactoryConnectionComponent.h"
 #include "FGFluidIntegrantInterface.h"
@@ -561,7 +563,7 @@ void UAutoLinkRootInstanceModule::HitScan(
             *result.Location.ToString(),
             *actor->GetActorLocation().ToString());
 
-        actors.Add(actor);
+        actors.AddUnique(actor);
     }
 }
 
@@ -606,7 +608,7 @@ void UAutoLinkRootInstanceModule::OverlapScan(
             *actor->GetActorLocation().ToString(),
             (actor->GetActorLocation() - scanStart).Length());
 
-        actors.Add(actor);
+        actors.AddUnique(actor);
     }
 }
 
@@ -627,20 +629,20 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
     {
         // If this is a belt then it in needs to be against the connector, but search
         // a little bit outward to be sure we hit any buildable containing a connector
-        searchDistance = 10.0;
+        searchDistance = 20.0;
     }
     else if ((connectionConveyorLift = Cast<AFGBuildableConveyorLift>(outerBuildable)) != nullptr)
     {
         // If this is a conveyor lift, then there could be another conveyor lift facing it
         // A single conveyor lift can have its bellows extended to 300 units away, so we have
         // to search twice that distance plus a bit to ensure we hit the buildable
-        searchDistance = 610.0;
+        searchDistance = 620.0;
     }
     else
     {
         // If this is a normal factory/buildable, it could still be aligned with a fully-extended
         // conveyor lift and we still pad a bit to ensure an appropriate hit
-        searchDistance = 310.0;
+        searchDistance = 320.0;
     }
 
     auto connectorLocation = connectionComponent->GetConnectorLocation();
@@ -661,12 +663,12 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
 
     // 12 is a random guess of the max possible candidates we could ever really see
     TArray<UFGFactoryConnectionComponent*, TInlineAllocator<12>> candidates;
-    for (auto actor : hitActors)
+    for (auto hitActor : hitActors)
     {
-        if (auto hitConveyor = Cast<AFGBuildableConveyorBase>(actor))
+        if (auto hitConveyor = Cast<AFGBuildableConveyorBase>(hitActor))
         {
             // We always consider conveyors as candidates and we can get their candidate connection faster than searching all their components
-            AL_LOG("FindAndLinkCompatibleBeltConnection: Examining conveyor %s of type %s", *hitConveyor->GetName(), *hitConveyor->GetClass()->GetName());
+            AL_LOG("FindAndLinkCompatibleBeltConnection: Hit result is conveyor %s of type %s", *hitConveyor->GetName(), *hitConveyor->GetClass()->GetName());
             auto candidateConnection = connectionDirection == EFactoryConnectionDirection::FCD_INPUT
                 ? hitConveyor->GetConnection1()
                 : hitConveyor->GetConnection0();
@@ -680,11 +682,11 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         // nothing else can be a valid candidate unless we are a conveyor.
         if (!connectionConveyorBelt && !connectionConveyorLift)
         {
-            AL_LOG("FindAndLinkCompatibleBeltConnection: NOT considering hit result actor %s of type %s because Connector is not on a conveyor", *actor->GetName(), *actor->GetClass()->GetName());
+            AL_LOG("FindAndLinkCompatibleBeltConnection: NOT considering hit result actor %s of type %s because Connector is not on a conveyor", *hitActor->GetName(), *hitActor->GetClass()->GetName());
             continue;
         }
 
-        if (auto buildable = Cast<AFGBuildable>(actor))
+        if (auto buildable = Cast<AFGBuildable>(hitActor))
         {
             AL_LOG("FindAndLinkCompatibleBeltConnection: Examining buildable %s of type %s", *buildable->GetName(), *buildable->GetClass()->GetName());
             TInlineComponentArray<UFGFactoryConnectionComponent*> openConnections;
@@ -698,11 +700,11 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         else
         {
             // This shouldn't really happen but if it does, I'd like a message in the log while testing
-            AL_LOG("FindAndLinkCompatibleBeltConnection: Ignoring hit result actor %s of type %s", *actor->GetName(), *actor->GetClass()->GetName());
+            AL_LOG("FindAndLinkCompatibleBeltConnection: Ignoring hit result actor %s of type %s", *hitActor->GetName(), *hitActor->GetClass()->GetName());
         }
     }
 
-    float closestDistanceSq = FLT_MAX;
+    float closestDistance = FLT_MAX;
     UFGFactoryConnectionComponent* compatibleConnectionComponent = nullptr;
     for (auto& candidateConnection : candidates)
     {
@@ -713,13 +715,6 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         if (!IsValid(candidateConnection))
         {
             AL_LOG("FindAndLinkCompatibleBeltConnection:\tNot valid!");
-            continue;
-        }
-
-        if (candidateConnection == compatibleConnectionComponent)
-        {
-            // Sometimes the resolving the hit scan yields multiple hits on the same component; we can short-circuit that here.
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tRedundant! This is already the best candidate.");
             continue;
         }
 
@@ -735,139 +730,198 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
             continue;
         }
 
-        // Now that the quickest checks are done, check distances
-        auto minConnectorDistance = 0.0f;
-        auto maxConnectorDistance = 0.0f;
+        // Now that the quickest checks are done, check distance
+        // These are offsets where negative is behind the connector (against the normal) and positive is in front (with the normal).
+        auto minConnectorOffset = 0.0f;
+        auto maxConnectorOffset = 0.0f;
 
         auto candidateOuterBuildable = candidateConnection->GetOuterBuildable();
-        if (auto candidateConveyorBelt = Cast<AFGBuildableConveyorBelt>(candidateOuterBuildable))
-        {
-            // If the candidate is a belt, leave the distances at 0, since the belt has to be up against the connector.
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tBelt to belt. Candidate is: %s", *candidateConveyorBelt->GetName());
-        }
-        else if (auto candidateConveyorLift = Cast<AFGBuildableConveyorLift>(candidateOuterBuildable))
+        auto candidateConveyorBelt = Cast<AFGBuildableConveyorBelt>(candidateOuterBuildable);
+        auto candidateConveyorLift = Cast<AFGBuildableConveyorLift>(candidateOuterBuildable);
+
+        if (candidateConveyorLift)
         {
             AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate connection is on conveyor lift %s", *candidateConveyorLift->GetName());
             if (connectionConveyorLift)
             {
-                // Scanning from a lift and hit a lift, so max distance will depend on the bellows of both lifts
-                minConnectorDistance = 100.0; // Prevent conveyor lifts from smashing into and protruding past each other
+                // Scanning from a lift and hit a lift, so max offset will depend on the bellows of both lifts
+                minConnectorOffset = 100.0; // Prevent conveyor lifts from smashing into and protruding past each other
                 // At the very least, they can be their combined connector clearances away. May be further based on bellows
-                maxConnectorDistance = connectionComponent->GetConnectorClearance() + candidateConnection->GetConnectorClearance();
+                maxConnectorOffset = connectionComponent->GetConnectorClearance() + candidateConnection->GetConnectorClearance();
 
                 switch (connectionDirection)
                 {
                     // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
                 case EFactoryConnectionDirection::FCD_INPUT:
-                    maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[0];
-                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[1];
+                    maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[0];
+                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[1];
                     break;
                 case EFactoryConnectionDirection::FCD_OUTPUT:
-                    maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[1];
-                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[0];
+                    maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[1];
+                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[0];
                     break;
                 }
+
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConveyor lift to conveyor lift. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
             }
             else
             {
-                // Scanning from a buildable and hit a lift, so max distance will depend on the bellows of the hit lift
-                minConnectorDistance = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
-                maxConnectorDistance = candidateConnection->GetConnectorClearance();
+                // Scanning from a buildable and hit a lift, so max offset will depend on the bellows of the hit lift
+                minConnectorOffset = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
+                maxConnectorOffset = candidateConnection->GetConnectorClearance();
                 switch (connectionDirection)
                 {
                     // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
                 case EFactoryConnectionDirection::FCD_INPUT:
-                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[1];
+                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[1];
                     break;
                 case EFactoryConnectionDirection::FCD_OUTPUT:
-                    maxConnectorDistance += candidateConveyorLift->mOpposingConnectionClearance[0];
+                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[0];
                     break;
                 }
+
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tBuildable to conveyor lift. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
             }
         }
         else if (connectionConveyorLift)
         {
-            // Scanning from a lift and hit a buildable, so max distance will depend on the bellows of the lift
-            minConnectorDistance = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
-            maxConnectorDistance = connectionComponent->GetConnectorClearance();
+            // Scanning from a lift and hit a buildable, so max offset will depend on the bellows of the lift
+            minConnectorOffset = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
+            maxConnectorOffset = connectionComponent->GetConnectorClearance();
             switch (connectionDirection)
             {
                 // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
             case EFactoryConnectionDirection::FCD_INPUT:
-                maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[0];
+                maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[0];
                 break;
             case EFactoryConnectionDirection::FCD_OUTPUT:
-                maxConnectorDistance += connectionConveyorLift->mOpposingConnectionClearance[1];
+                maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[1];
                 break;
+            }
+
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tConveyor lift to buildable. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
+        }
+
+        // Dimensional depot input connectors are 10 units deeper than storage container input connectors. This misalignment
+        // means replacing a storage container with a dimensional depot (or vice versa) doesn't naturally autolink, which is
+        // confusing since it's intuitive to swap one for the other at different points. Since there's a glow around the depot
+        // connector that hides any small gap, we can compensate with offset tolerances and it won't look weird, whether the
+        // belt ends in a dim depot glow or extends into the storage container an extra 10 units.
+        if (connectionDirection == EFactoryConnectionDirection::FCD_INPUT && (candidateConveyorBelt || candidateConveyorLift))
+        {
+            if (outerBuildable->IsA(AFGCentralStorageContainer::StaticClass()))
+            {
+                maxConnectorOffset += 10.0f;
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tDimensional depot to conveyor. Setting max connector offset to %f to handle alignment issues.", maxConnectorOffset);
+            }
+            else if (outerBuildable->IsA(AFGBuildableStorage::StaticClass()))
+            {
+                minConnectorOffset -= 10.0f;
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tStorage container to conveyor. Settings min connector offset to %f to handle alignment issues.", minConnectorOffset);
+            }
+        }
+        else if (connectionDirection == EFactoryConnectionDirection::FCD_OUTPUT && (connectionConveyorBelt || connectionConveyorLift))
+        {
+            if (candidateOuterBuildable->IsA(AFGCentralStorageContainer::StaticClass()))
+            {
+                maxConnectorOffset += 10.0f;
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConveyor to dimensional depot. Setting max connector offset to %f to handle alignment issues.", maxConnectorOffset);
+            }
+            else if (candidateOuterBuildable->IsA(AFGBuildableStorage::StaticClass()))
+            {
+                minConnectorOffset -= 10.0f;
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConveyor to storage container. Settings min connector offset to %f to handle alignment issues.", minConnectorOffset);
             }
         }
 
-        const FVector candidateLocation = candidateConnection->GetConnectorLocation();
-        const FVector fromCandidateToConnectorVector = connectorLocation - candidateLocation; // This gives the vector from the candidate connection to the main connector
-        const float distanceSq = fromCandidateToConnectorVector.SquaredLength();
-        const float minDistanceSq = minConnectorDistance == 0.0f ? 0.0f : ((minConnectorDistance * minConnectorDistance) - 1); // Give a little padding for floating points
-        const float maxDistanceSq = (maxConnectorDistance * maxConnectorDistance) + 1; // A little padding for floating points
-        AL_LOG("FindAndLinkCompatibleBeltConnection:\tMin Distance: %f, Max Distance: %f, Distance: %f!", minConnectorDistance, maxConnectorDistance, FMath::Sqrt(distanceSq));
-        if (distanceSq < minDistanceSq || distanceSq > maxDistanceSq)
+        if (minConnectorOffset > maxConnectorOffset)
         {
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tOther connection is too close or too far. Min Distance SQ: %f, Max Distance SQ: %f, Distance SQ: %f!", minDistanceSq, maxDistanceSq, distanceSq);
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tMin offset %f is greater than Max offset %f? Would be great to get a reproduction of how this could happen... skipping this candidate", minConnectorOffset, maxConnectorOffset);
             continue;
         }
+
+        const FVector candidateConnectorLocation = candidateConnection->GetConnectorLocation();
+        FVector fromCandidateToConnectorVector = connectorLocation - candidateConnectorLocation; // This gives the vector from the candidate connection to the main connector
+
+        AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnector Location %s, Candidate Location: %s, Candidate to Connector Vector: %s",
+            *connectorLocation.ToString(),
+            *candidateConnectorLocation.ToString(),
+            *fromCandidateToConnectorVector.ToString());
 
         const FVector connectorNormal = connectionComponent->GetConnectorNormal();
         const FVector candidateConnectorNormal = candidateConnection->GetConnectorNormal();
 
-        // Determine if the connection components are aligned. If the cross product is 0, they are on the same line
-        const FVector crossProduct = FVector::CrossProduct(connectorNormal, candidateConnectorNormal);
-        auto isCollinear = crossProduct.IsNearlyZero(.01);
-        if (!isCollinear)
-        {
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tOther connection normal is not collinear with this connector normal! The parts are not aligned!");
-            continue;
-        }
+        AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnector normal: %s, Candidate normal: %s",
+            *connectorNormal.ToString(),
+            *candidateConnectorNormal.ToString());
 
-        if (distanceSq < 1)
-        {
-            // If we're within 1 cm and they're collinear, this is a belt-to-something connection that's the ideal distance.
-            // Now we just need to make sure they're facing each other so we know they're not overlapping in the same direction.
+        double fromCandidateToConnectorDistance;
 
-            // If a dot product is positive, then the vectors are less than 90 degrees apart.
-            // So this dot product should be negative, meaning the connector normal is pointing AGAINST the candidate normal vector
-            const double connectorDotProduct = connectorNormal.Dot(candidateConnectorNormal);
-            if (connectorDotProduct >= 0)
+        const float CompareTolerance = .1;
+        if (fromCandidateToConnectorVector.IsNearlyZero(CompareTolerance))
+        {
+            if (!FVector::PointsAreNear(connectorNormal, -candidateConnectorNormal, CompareTolerance))
             {
-                AL_LOG("FindAndLinkCompatibleBeltConnection:\tThe connectors are not facing in opposite directions! connectorDotProduct: %.8f", connectorDotProduct);
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are touching but not pointed in opposite directions!");
                 continue;
             }
 
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tFound one that's less than 1 cm away; take it as the best result. Location: %s", *candidateLocation.ToString());
-            closestDistanceSq = distanceSq;
-            compatibleConnectionComponent = candidateConnection;
-            break;
+            fromCandidateToConnectorDistance = 0;
+        }
+        else
+        {
+            FVector fromCandidateToConnectorNormal;
+            fromCandidateToConnectorVector.ToDirectionAndLength(fromCandidateToConnectorNormal, fromCandidateToConnectorDistance);
+
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate Distance: %f, Candidate to connector normal: %s",
+                fromCandidateToConnectorDistance,
+                *fromCandidateToConnectorNormal.ToString());
+
+            auto areAlignedInOppositeDirections =
+                (FVector::PointsAreNear(candidateConnectorNormal, fromCandidateToConnectorNormal, CompareTolerance) &&
+                 FVector::PointsAreNear(connectorNormal, -fromCandidateToConnectorNormal, CompareTolerance))
+                ||
+                (FVector::PointsAreNear(candidateConnectorNormal, -fromCandidateToConnectorNormal, CompareTolerance) &&
+                 FVector::PointsAreNear(connectorNormal, fromCandidateToConnectorNormal, CompareTolerance));
+
+            if (!areAlignedInOppositeDirections)
+            {
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are not aligned and/or are not pointed in opposite directions!");
+                continue;
+            }
+
+            // Pad a bit to compensate for floating point precision
+            auto minOffsetPoint = connectorLocation + (minConnectorOffset * connectorNormal);
+            auto maxOffsetPoint = connectorLocation + (maxConnectorOffset * connectorNormal);
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tMin offset point: %s, Max offset point: %s", *minOffsetPoint.ToString(), *maxOffsetPoint.ToString());
+
+#define IS_IN_RANGE( VALUE, MIN, MAX, TOLERANCE ) (VALUE >= (MIN - TOLERANCE) && VALUE <= (MAX + TOLERANCE))
+#define IS_BETWEEN( VALUE, FIRST, SECOND, TOLERANCE) \
+        ((FIRST <= SECOND) ? IS_IN_RANGE(VALUE, FIRST, SECOND, TOLERANCE) : IS_IN_RANGE(VALUE, SECOND, FIRST, TOLERANCE))
+
+            if (!IS_BETWEEN(candidateConnectorLocation.X, minOffsetPoint.X, maxOffsetPoint.X, CompareTolerance) ||
+                !IS_BETWEEN(candidateConnectorLocation.Y, minOffsetPoint.Y, maxOffsetPoint.Y, CompareTolerance) ||
+                !IS_BETWEEN(candidateConnectorLocation.Z, minOffsetPoint.Z, maxOffsetPoint.Z, CompareTolerance))
+            {
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate is not an allowed distance from the connector! Candidate location: %s", *candidateConnectorLocation.ToString());
+                continue;
+            }
+
+#undef IS_IN_RANGE
+#undef IS_BETWEEN
         }
 
-        // We're further than 1 cm but within an allowed distance (e.g. two conveyor lifts that are lined up nicely).
-        // Determine if both connectors are in front of each other (meaning they're facing in opposite directions). If we don't do
-        // this check, the connectors might be facing away or overlapping but past each other; this latter case is why we check the
-        // normal vectors against the vector linking the two connectors.  If we just did their normal vectors, they could be on the
-        // wrong sides of each other and still give a "facing in opposite directions" result.
-        // 
-        // If a dot product is positive, then the vectors are less than 90 degrees apart.
-        // So this dot product should be negative, meaning the connector normal is pointing AGAINST the vector from the candidate to the connector
-        const double connectorNormalDotProduct = connectorNormal.Dot(fromCandidateToConnectorVector);
-        // And this dot product should be positive, meaning the candidate connector normal is pointing WITH the vector from the candidate to the connector
-        const double candidateNormalDotProduct = candidateConnectorNormal.Dot(fromCandidateToConnectorVector);
-        if (connectorNormalDotProduct > 0 || candidateNormalDotProduct < 0)
+        if (fromCandidateToConnectorDistance < closestDistance)
         {
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tThe connectors are not each facing each other! connectorDotVec: %f, candidateDotVec: %f", connectorNormalDotProduct, candidateNormalDotProduct);
-            continue;
-        }
-
-        if (distanceSq < closestDistanceSq)
-        {
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tFound a new closest one at: %s", *candidateLocation.ToString());
-            closestDistanceSq = distanceSq;
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tFound a new closest one (%f) at: %s", fromCandidateToConnectorDistance, *candidateConnectorLocation.ToString());
+            closestDistance = fromCandidateToConnectorDistance;
             compatibleConnectionComponent = candidateConnection;
+
+            if (closestDistance < 1)
+            {
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tFound extremely close candidate (%f units away). Taking it as the best.", closestDistance);
+                break;
+            }
         }
     }
 
@@ -1152,9 +1206,7 @@ bool UAutoLinkRootInstanceModule::ConnectBestPipeCandidate(UFGPipeConnectionComp
             continue;
         }
 
-        // For belt connectors, we do dot product things to ensure they are facing each other because conveyor lifts can be further away,
-        // meaning they could also theoretically be on the wrong side (e.g. clipping through the factory). Pipes have to be virtually touching
-        // for us to link them so we just make double sure of that here.
+        // Pipes have to be virtually touching for us to link them so we just make double sure of that here.
         const FVector otherLocation = candidateConnection->GetConnectorLocation();
         const float distanceSq = FVector::DistSquared(otherLocation, connectorLocation);
         if (distanceSq > 1) // Anything more than a 1 cm away is too far (and most are even much closer, based on my tests)
