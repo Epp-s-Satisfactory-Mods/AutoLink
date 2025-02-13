@@ -858,8 +858,9 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         double fromCandidateToConnectorDistance;
 
         const float CompareTolerance = .1;
-        if (fromCandidateToConnectorVector.IsNearlyZero(CompareTolerance))
+        if (fromCandidateToConnectorVector.IsNearlyZero(CompareTolerance) && minConnectorOffset <= 0 && maxConnectorOffset >= 0)
         {
+            // If the connectors are touching and 0 is an allowed distance, then check whether they are facing each other.
             if (!FVector::PointsAreNear(connectorNormal, -candidateConnectorNormal, CompareTolerance))
             {
                 AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are touching but not pointed in opposite directions!");
