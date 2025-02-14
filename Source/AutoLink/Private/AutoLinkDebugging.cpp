@@ -57,7 +57,12 @@ void AutoLinkDebugging::RegisterDebugHooks()
             AL_LOG("UFGBuildGunState::OnRecipeSampled. Actor is %s (%s) at %x.", *actor->GetName(), *actor->GetClass()->GetName(), actor);
 
             bool dumpedAtLeastOnce = false;
-            if (auto conveyor = Cast<AFGBuildableConveyorBase>(actor))
+            if (auto conveyorLift = Cast<AFGBuildableConveyorLift>(actor))
+            {
+                DumpConveyorLift(TEXT("UFGBuildGunState::OnRecipeSampled"), conveyorLift);
+                dumpedAtLeastOnce = true;
+            }
+            else if (auto conveyor = Cast<AFGBuildableConveyorBase>(actor))
             {
                 DumpConveyor(TEXT("UFGBuildGunState::OnRecipeSampled"), conveyor);
                 dumpedAtLeastOnce = true;
@@ -1252,39 +1257,27 @@ void AutoLinkDebugging::RegisterPipeTraceHooks()
         });
 }
 
-void AutoLinkDebugging::DumpConnection(FString prefix, UFGFactoryConnectionComponent* c)
+void AutoLinkDebugging::DumpConnection(FString prefix, UFGFactoryConnectionComponent* c, bool dumpConnected)
 {
     EnsureColon(prefix);
     if (!c)
     {
-        AL_LOG("%sConnection is null", *prefix);
+        AL_LOG("%s Connection is null", *prefix);
         return;
     }
     AL_LOG("%s Connection is %s", *prefix, *c->GetFName().GetPlainNameString());
 
     auto nestedPrefix = GetNestedPrefix(prefix);
 
-    AL_LOG("%s mConnector: %d", *nestedPrefix, c->mConnector);
-    AL_LOG("%s mDirection: %d", *nestedPrefix, c->mDirection);
+    AL_LOG("%s mDirection: %s", *nestedPrefix, *StaticEnum<EFactoryConnectionDirection>()->GetNameStringByValue((int64)c->mDirection));
     AL_LOG("%s mConnectorClearance: %f", *nestedPrefix, c->mConnectorClearance);
-    if (c->mConnectedComponent)
+
+    if (dumpConnected)
     {
-        AL_LOG("%s mConnectedComponent: %s on %s", *nestedPrefix, *c->mConnectedComponent->GetFName().GetPlainNameString(), *c->mConnectedComponent->GetOuterBuildable()->GetName());
+        DumpConnection(GetNestedPrefix(nestedPrefix).Append(" mConnectedComponent"), c->mConnectedComponent, false);
     }
-    else
-    {
-        AL_LOG("%s mConnectedComponent: null", *nestedPrefix);
-    }
+
     AL_LOG("%s mHasConnectedComponent: %d", *nestedPrefix, c->mHasConnectedComponent);
-    if (c->mConnectionInventory)
-    {
-        AL_LOG("%s mConnectionInventory: %s", *nestedPrefix, *c->mConnectionInventory->GetName());
-    }
-    else
-    {
-        AL_LOG("%s mConnectionInventory: null", *nestedPrefix);
-    }
-    AL_LOG("%s mInventoryAccessIndex: %d", *nestedPrefix, c->mInventoryAccessIndex);
     if (c->mOuterBuildable)
     {
         AL_LOG("%s mOuterBuildable: %s", *nestedPrefix, *c->mOuterBuildable->GetName());
@@ -1293,7 +1286,6 @@ void AutoLinkDebugging::DumpConnection(FString prefix, UFGFactoryConnectionCompo
     {
         AL_LOG("%s mOuterBuildable: null", *nestedPrefix);
     }
-    AL_LOG("%s mForwardPeekAndGrabToBuildable: %d", *nestedPrefix, c->mForwardPeekAndGrabToBuildable);
 }
 
 void AutoLinkDebugging::DumpConveyor(FString prefix, AFGBuildableConveyorBase* conveyor)
@@ -1301,7 +1293,7 @@ void AutoLinkDebugging::DumpConveyor(FString prefix, AFGBuildableConveyorBase* c
     EnsureColon(prefix);
     if (!conveyor)
     {
-        AL_LOG("%s Conveyor is null", *prefix);
+        AL_LOG("%s AFGBuildableConveyorBase is null", *prefix);
         return;
     }
 
@@ -1329,6 +1321,21 @@ void AutoLinkDebugging::DumpConveyor(FString prefix, AFGBuildableConveyorBase* c
 
     DumpConnection(prefix, conveyor->GetConnection0());
     DumpConnection(prefix, conveyor->GetConnection1());
+}
+
+void AutoLinkDebugging::DumpConveyorLift(FString prefix, AFGBuildableConveyorLift* conveyor)
+{
+    EnsureColon(prefix);
+    if (!conveyor)
+    {
+        AL_LOG("%s AFGBuildableConveyorLift is null", *prefix);
+        return;
+    }
+
+    DumpConveyor(prefix, conveyor);
+
+    AL_LOG("%s mOpposingConnectionClearance[0]: %f", *prefix, conveyor->mOpposingConnectionClearance[0]);
+    AL_LOG("%s mOpposingConnectionClearance[1]: %f", *prefix, conveyor->mOpposingConnectionClearance[1]);
 }
 
 void AutoLinkDebugging::DumpConnection(FString prefix, UFGPipeConnectionComponent* c)

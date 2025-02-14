@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "FGBuildableConveyorBase.h"
+#include "FGBuildableConveyorLift.h"
 #include "FGBuildEffectActor.h"
 #include "FGBuildableRailroadSignal.h"
 #include "FGFactoryConnectionComponent.h"
@@ -21,8 +22,9 @@ public:
     static void RegisterRailTraceHooks();
     static void RegisterPipeTraceHooks();
 
-    static void DumpConnection(FString prefix, UFGFactoryConnectionComponent* c);
+    static void DumpConnection(FString prefix, UFGFactoryConnectionComponent* c, bool dumpConnected = true);
     static void DumpConveyor(FString prefix, AFGBuildableConveyorBase* conveyor);
+    static void DumpConveyorLift(FString prefix, AFGBuildableConveyorLift* conveyor);
     static void DumpConnection(FString prefix, UFGPipeConnectionComponent* c);
     static void DumpFluidIntegrant(FString prefix, IFGFluidIntegrantInterface* f);
     static void DumpConnection(FString prefix, UFGPipeConnectionComponentHyper* c);

@@ -633,10 +633,10 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
     }
     else if ((connectionConveyorLift = Cast<AFGBuildableConveyorLift>(outerBuildable)) != nullptr)
     {
-        // If this is a conveyor lift, then there could be another conveyor lift facing it
-        // A single conveyor lift can have its bellows extended to 300 units away, so we have
-        // to search twice that distance plus a bit to ensure we hit the buildable
-        searchDistance = 620.0;
+        // If this is a conveyor lift, then there could be another conveyor lift facing it.
+        // Conveyor lifts can directly connect with their connectors at 400 units away,
+        // so we have that distance plus a bit to ensure we hit the buildable
+        searchDistance = 420.0;
     }
     else
     {
@@ -739,67 +739,24 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         auto candidateConveyorBelt = Cast<AFGBuildableConveyorBelt>(candidateOuterBuildable);
         auto candidateConveyorLift = Cast<AFGBuildableConveyorLift>(candidateOuterBuildable);
 
-        if (candidateConveyorLift)
+        if (connectionConveyorBelt || candidateConveyorBelt)
         {
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate connection is on conveyor lift %s", *candidateConveyorLift->GetName());
-            if (connectionConveyorLift)
-            {
-                // Scanning from a lift and hit a lift, so max offset will depend on the bellows of both lifts
-                minConnectorOffset = 100.0; // Prevent conveyor lifts from smashing into and protruding past each other
-                // At the very least, they can be their combined connector clearances away. May be further based on bellows
-                maxConnectorOffset = connectionComponent->GetConnectorClearance() + candidateConnection->GetConnectorClearance();
-
-                switch (connectionDirection)
-                {
-                    // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
-                case EFactoryConnectionDirection::FCD_INPUT:
-                    maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[0];
-                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[1];
-                    break;
-                case EFactoryConnectionDirection::FCD_OUTPUT:
-                    maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[1];
-                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[0];
-                    break;
-                }
-
-                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConveyor lift to conveyor lift. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
-            }
-            else
-            {
-                // Scanning from a buildable and hit a lift, so max offset will depend on the bellows of the hit lift
-                minConnectorOffset = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
-                maxConnectorOffset = candidateConnection->GetConnectorClearance();
-                switch (connectionDirection)
-                {
-                    // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
-                case EFactoryConnectionDirection::FCD_INPUT:
-                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[1];
-                    break;
-                case EFactoryConnectionDirection::FCD_OUTPUT:
-                    maxConnectorOffset += candidateConveyorLift->mOpposingConnectionClearance[0];
-                    break;
-                }
-
-                AL_LOG("FindAndLinkCompatibleBeltConnection:\tBuildable to conveyor lift. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
-            }
+            // If there's a belt involved, leave the offsets at 0, since belts have to be up against the connector
+            // (unless a storage container or dimensional depot are involved, but we handle those later).
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tBelt involved. Leaving offsets at 0 for now.");
         }
-        else if (connectionConveyorLift)
+        else if (connectionConveyorLift || candidateConveyorLift)
         {
-            // Scanning from a lift and hit a buildable, so max offset will depend on the bellows of the lift
-            minConnectorOffset = 100.0; // Prevent the conveyor lift from smashing into the buildable too extremely much...
-            maxConnectorOffset = connectionComponent->GetConnectorClearance();
-            switch (connectionDirection)
-            {
-                // If the conveyor bellows extended to snap on construction, add the clearances through which they snapped
-            case EFactoryConnectionDirection::FCD_INPUT:
-                maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[0];
-                break;
-            case EFactoryConnectionDirection::FCD_OUTPUT:
-                maxConnectorOffset += connectionConveyorLift->mOpposingConnectionClearance[1];
-                break;
-            }
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tAt least one conveyor lift is involved.");
 
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tConveyor lift to buildable. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
+            minConnectorOffset = 100.0; // Prevent the lift(s) from clipping in ways the game doesn't normally allow
+
+            // Two conveyor lifts can directly connect 400 units away. There are ways to make it look like two
+            // fully-extended lifts are attached at 300 units each but the game will shrink the bellows to 200
+            // units each on reload, even if we AutoLink them - the bellows only seem to extend into buildings.
+            // If it's just one conveyor lift, then we're either scanning to/from a building and those connectors
+            // can be at-most 300 units away as the bellows will fully extend for them.
+            maxConnectorOffset = connectionConveyorLift && candidateConveyorLift ? 400.0 : 300.0;
         }
 
         // Dimensional depot input connectors are 10 units deeper than storage container input connectors. This misalignment
@@ -834,6 +791,8 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
             }
         }
 
+        AL_LOG("FindAndLinkCompatibleBeltConnection:\tFinal values. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
+
         if (minConnectorOffset > maxConnectorOffset)
         {
             AL_LOG("FindAndLinkCompatibleBeltConnection:\tMin offset %f is greater than Max offset %f? Would be great to get a reproduction of how this could happen... skipping this candidate", minConnectorOffset, maxConnectorOffset);
@@ -858,8 +817,14 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         double fromCandidateToConnectorDistance;
 
         const float CompareTolerance = .1;
-        if (fromCandidateToConnectorVector.IsNearlyZero(CompareTolerance) && minConnectorOffset <= 0 && maxConnectorOffset >= 0)
+        if (fromCandidateToConnectorVector.IsNearlyZero(CompareTolerance))
         {
+            if (minConnectorOffset > 0 || maxConnectorOffset < 0)
+            {
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are touching but this is not allowed per the connector offsets!");
+                continue;
+            }
+
             // If the connectors are touching and 0 is an allowed distance, then check whether they are facing each other.
             if (!FVector::PointsAreNear(connectorNormal, -candidateConnectorNormal, CompareTolerance))
             {
