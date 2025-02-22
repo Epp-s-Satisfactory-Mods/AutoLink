@@ -956,6 +956,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         }
     }
 
+    TArray< UFGRailroadTrackConnectionComponent* > compatibleConnections;
     for (auto candidateConnection : candidates)
     {
         AL_LOG("FindAndLinkCompatibleRailroadConnection: Examining connection: %s on %s at %s (%f units away)",
@@ -982,7 +983,13 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
 
         if (alreadyConnectedToThis)
         {
-            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tAlready connected to this!");
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tAlready connected to this candidate!");
+            continue;
+        }
+
+        if (compatibleConnections.Contains(candidateConnection))
+        {
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThis connection is already slated for linking!");
             continue;
         }
 
@@ -1018,20 +1025,50 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
             continue;
         }
 
-        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close; so we're linking it. Location: %s", *candidateLocation.ToString());
-
-        connectionComponent->AddConnection(candidateConnection);
-        auto candidateGraphID = candidateConnection->GetTrack()->GetTrackGraphID();
-        if (candidateGraphID != INDEX_NONE)
-        {
-            auto subsystem = AFGRailroadSubsystem::Get(connectionComponent->GetWorld());
-            subsystem->AddTrackToGraph(connectionComponent->GetTrack(), candidateGraphID);
-        }
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close, so we're saving it for linking. Location: %s", *candidateLocation.ToString());
+        compatibleConnections.AddUnique(candidateConnection);
 
         // We don't break here - keep linking because railroads can be connected to multiple other railoads at junctions.
     }
 
-    AL_LOG("FindAndLinkCompatibleRailroadConnection: No compatible connection found");
+    // At the time this runs, the game has already created graph IDs and calculated overlapping tracks while thinking they are
+    // not connected (if they're connected, the code will not treat them as overlapping).  If the tracks are curved very tightly,
+    // they can ever-so-slightly overlap and get tracked as overlapping, which can confuse the game into thinking there are rail
+    // signal loops if we just simply connect them. Also, regardless of overlap, if you JUST connect the tracks and don't force
+    // the game to recalculate graphs and signal blocks here, that creates edge cases that messes up other rail signals.
+    // 
+    // Side note: all of these get fixed when the game gets reloaded and all rail stuff is calculated from scratch, which is comforting
+    // but obviously terrible user experience.
+    // 
+    // We can cover all but one known scenario by removing the current track, connecting it, then re-adding it and forcing recalculation.
+    // This also updates the overlapping calculations of the current track to NOT include the candidate.  But we have to iterate over
+    // the compatible connections and ensure they are each individually not overlapping and know they are not overlapping.
+
+    if (compatibleConnections.Num() > 0)
+    {
+        auto connectionTrack = connectionComponent->GetTrack();
+
+        auto subsystem = AFGRailroadSubsystem::Get(connectionComponent->GetWorld());
+        subsystem->RemoveTrack(connectionTrack);
+
+        for (auto compatibleConnection : compatibleConnections)
+        {
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tLinking to connection %s on %s", *compatibleConnection->GetName(), *compatibleConnection->GetTrack()->GetName());
+            connectionComponent->AddConnection(compatibleConnection);
+        }
+
+        subsystem->AddTrack(connectionTrack);
+
+        for (auto compatibleConnection : compatibleConnections)
+        {
+            auto compatibleTrack = compatibleConnection->GetTrack();
+            if (compatibleTrack->mOverlappingTracks.Contains(connectionTrack))
+            {
+                AL_LOG("FindAndLinkCompatibleRailroadConnection:\tTrack %s still thinks it's overlapping the base track. Updating it.", *compatibleTrack->GetName());
+                compatibleTrack->UpdateOverlappingTracks();
+            }
+        }
+    }
 }
 
 bool UAutoLinkRootInstanceModule::FindAndLinkCompatibleFluidConnection(

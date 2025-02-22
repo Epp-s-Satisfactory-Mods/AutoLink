@@ -582,9 +582,11 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
         });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, RemoveConnection, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::RemoveConnection START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnection START", self->GetTrack(), false);
+        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnection START", self, true);
+        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnection START", toComponent, true);
         scope(self, toComponent);
-        AL_LOG("UFGRailroadTrackConnectionComponent::RemoveConnection END");
+        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnection END", self->GetTrack(), false);
         });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, IsOccupied, [](auto& scope, const UFGRailroadTrackConnectionComponent* self, float distance) {
@@ -704,9 +706,11 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
         });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, RemoveConnectionInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", self->GetTrack(), false);
+        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", self, true);
+        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", toComponent, true);
         scope(self, toComponent);
-        AL_LOG("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal END");
+        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal END", self->GetTrack(), false);
         });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, OnConnectionsChangedInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self) {
@@ -921,9 +925,9 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
         });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, UpdateOverlappingTracks, [](auto& scope, AFGBuildableRailroadTrack* self) {
-        AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks START");
+        AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks START %s", *self->GetName());
         scope(self);
-        AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks END");
+        AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks END %s", *self->GetName());
         });
 
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, GetOverlappingTracks, [](auto& scope, AFGBuildableRailroadTrack* self) {
@@ -975,28 +979,29 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
 
     /* AFGRailroadSubsystem */
 
-    SUBSCRIBE_METHOD(AFGRailroadSubsystem::MoveTrackPosition,
-        [](auto& scope, struct FRailroadTrackPosition& position, float delta, float& out_movedDelta, float endStopDistance = 0.f)
-        {
-            DumpRailTrackPosition(TEXT("AFGRailroadSubsystem::MoveTrackPosition START"), &position);
-            scope(position, delta, out_movedDelta, endStopDistance);
-            DumpRailTrackPosition(TEXT("AFGRailroadSubsystem::MoveTrackPosition END"), &position);
-        });
+    // Called every time a train moves, so it's very noisy if you have a train!
+    //SUBSCRIBE_METHOD(AFGRailroadSubsystem::MoveTrackPosition,
+    //    [](auto& scope, struct FRailroadTrackPosition& position, float delta, float& out_movedDelta, float endStopDistance = 0.f)
+    //    {
+    //        DumpRailTrackPosition(TEXT("AFGRailroadSubsystem::MoveTrackPosition START"), &position);
+    //        scope(position, delta, out_movedDelta, endStopDistance);
+    //        DumpRailTrackPosition(TEXT("AFGRailroadSubsystem::MoveTrackPosition END"), &position);
+    //    });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddTrack,
         [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
         {
-            AL_LOG("AFGRailroadSubsystem::AddTrack START %s (%s). track: %s", *self->GetName(), *self->GetClass()->GetName(), *track->GetName());
+            DumpRailTrack("AFGRailroadSubsystem::AddTrack START", track, false);
             scope(self, track);
-            AL_LOG("AFGRailroadSubsystem::AddTrack END");
+            DumpRailSubsystem("AFGRailroadSubsystem::AddTrack END", self);
         });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveTrack,
         [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
         {
-            AL_LOG("AFGRailroadSubsystem::RemoveTrack START %s (%s). track: %s", *self->GetName(), *self->GetClass()->GetName(), *track->GetName());
+            DumpRailTrack("AFGRailroadSubsystem::RemoveTrack START", track, false);
             scope(self, track);
-            AL_LOG("AFGRailroadSubsystem::RemoveTrack END");
+            DumpRailSubsystem("AFGRailroadSubsystem::RemoveTrack END", self);
         });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddSignal,
@@ -1019,6 +1024,7 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
         [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
         {
             AL_LOG("AFGRailroadSubsystem::RebuildTrackGraph START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
+            DumpRailSubsystem("AFGRailroadSubsystem::RebuildTrackGraph START", self);
             scope(self, graphID);
             DumpRailSubsystem("AFGRailroadSubsystem::RebuildTrackGraph END", self);
         });
@@ -1494,6 +1500,8 @@ void AutoLinkDebugging::DumpRailConnection(FString prefix, const UFGRailroadTrac
     AL_LOG("%s mSwitchPosition: %d", *nestedPrefix, c->mSwitchPosition);
     DumpRailSignal(FString(nestedPrefix).Append(TEXT(" mFacingSignal")), c->mFacingSignal);
     DumpRailSignal(FString(nestedPrefix).Append(TEXT(" mTrailingSignal")), c->mTrailingSignal);
+
+
 }
 
 void AutoLinkDebugging::DumpRailTrackPosition(FString prefix, const FRailroadTrackPosition* p)
@@ -1581,7 +1589,6 @@ void AutoLinkDebugging::DumpRailSignal(FString prefix, const AFGBuildableRailroa
 
     AL_LOG("%s AFGBuildableRailroadSignal is %s", *prefix, *s->GetName());
     FString nestedPrefix = GetNestedPrefix(prefix);
-    DumpRailConnection(FString(nestedPrefix).Append(TEXT(" mOwningConnection")), s->mOwningConnection, true);
 
     AL_LOG("%s mGuardedConnections has %d elements", *nestedPrefix, s->mGuardedConnections.Num());
     int i = 0;
@@ -1598,8 +1605,8 @@ void AutoLinkDebugging::DumpRailSignal(FString prefix, const AFGBuildableRailroa
     }
 
     DumpRailSignalBlock(FString(nestedPrefix).Append(TEXT(" mObservedBlock")), s->mObservedBlock.Pin().Get());
-    AL_LOG("%s mAspect: %d", *nestedPrefix, s->mAspect);
-    AL_LOG("%s mBlockValidation: %d", *nestedPrefix, s->mBlockValidation);
+    AL_LOG("%s mAspect: %d", *nestedPrefix, *GetEnumNameString(s->mAspect));
+    AL_LOG("%s mBlockValidation: %s", *nestedPrefix, *GetEnumNameString(s->mBlockValidation));
     AL_LOG("%s mIsPathSignal: %d", *nestedPrefix, s->mIsPathSignal);
     AL_LOG("%s mIsBiDirectional: %d", *nestedPrefix, s->mIsBiDirectional);
     AL_LOG("%s mVisualState: %d", *nestedPrefix, s->mVisualState);

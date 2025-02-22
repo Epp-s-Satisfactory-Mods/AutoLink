@@ -8,7 +8,7 @@
 #define AL_DEBUG_ENABLE_MOD (!AL_DEBUG_ENABLED || 1)
 
 // Whether to enable general trace hooks for analysis
-#define AL_REGISTER_GENERAL_DEBUG_TRACE_HOOKS (AL_DEBUG_ENABLED && 1)
+#define AL_REGISTER_GENERAL_DEBUG_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)
 
 // Whether to enable build effect trace hooks for analysis
 #define AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS (AL_DEBUG_ENABLED && 0)

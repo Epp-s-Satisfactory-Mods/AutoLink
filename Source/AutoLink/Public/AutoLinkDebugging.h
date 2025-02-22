@@ -64,5 +64,11 @@ public:
         return FString(prefix).Append("    ");
     }
 
+    template<typename TEnum>
+    static FString GetEnumNameString(TEnum value)
+    {
+        return StaticEnum<TEnum>()->GetNameStringByValue((int64)value);
+    }
+
     static void RebuildSignalBlocks(AFGRailroadSubsystem* self, int32 graphID);
 };
