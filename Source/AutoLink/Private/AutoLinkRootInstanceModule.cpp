@@ -496,7 +496,12 @@ void UAutoLinkRootInstanceModule::AddIfCandidate(TInlineComponentArray<UFGRailro
         return;
     }
 
-    // Railroads can have multiple connections, so they're always candidates
+    auto numConnections = connection->GetConnections().Num();
+    if ( numConnections >= MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+    {
+        AL_LOG("\tAddIfCandidate: UFGRailroadTrackConnectionComponent is full with %d connections", numConnections);
+        return;
+    }
 
     openConnections.Add(connection);
 }
@@ -916,7 +921,12 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
 
 void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent)
 {
-    // Note that we do NOT short-circuit if it's already connected because railroads can have multiple connections
+    auto numStartingConnections = connectionComponent->GetConnections().Num();
+    if (numStartingConnections >= MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+    {
+        AL_LOG("FindAndLinkCompatibleBeltConnection: Exiting because the connection component is already full");
+        return;
+    }
 
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
@@ -956,6 +966,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         }
     }
 
+    auto numCompatibleConnections = 0;
     TArray< UFGRailroadTrackConnectionComponent* > compatibleConnections;
     for (auto candidateConnection : candidates)
     {
@@ -1025,26 +1036,70 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
             continue;
         }
 
-        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound one that's extremely close, so we're saving it for linking. Location: %s", *candidateLocation.ToString());
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThis is a compatible connection! Saving it for linking. Location: %s", *candidateLocation.ToString());
         compatibleConnections.AddUnique(candidateConnection);
+        ++numCompatibleConnections;
 
-        // We don't break here - keep linking because railroads can be connected to multiple other railoads at junctions.
+        if (numStartingConnections + numCompatibleConnections >= MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+        {
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d existing connections and we've found %d to link, which will fill it up. Breaking out of search loop.", numStartingConnections, numCompatibleConnections);
+            break;
+        }
+
+        // The connection isn't full yet, so keep searching for compatible connections.
+    }
+
+    if (numStartingConnections + numCompatibleConnections > MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+    {
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d connections and we saved %d more to connect, which totals to more than the allowed %d. This really shouldn't happen - there's a bug somewhere! Aborting!",
+            numStartingConnections,
+            numCompatibleConnections,
+            MAX_CONNECTIONS_PER_RAIL_CONNECTOR);
+        return;
+    }
+
+    AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound a total of %d compatible connections to attempt to link", numCompatibleConnections);
+
+    if (numCompatibleConnections > 1)
+    {
+        // Linking multiple connections to the same opposing connection creates a switch in the graph so trains
+        // can choose which route to take. If we're here, we're about to create a switch in the graph but if any
+        // of the compatible connections already share a connection, then they already have a switch going in the
+        // opposite direction. The game doesn't allow creating a switch on top of an existing switch (even going
+        // in the other direction) and it's not clear if that could even work, so we don't allow it.
+        TSet<UFGRailroadTrackConnectionComponent*> opposingConnections;
+        for (auto compatibleConnection : compatibleConnections)
+        {
+            for (auto opposingConnection : compatibleConnection->GetConnections())
+            {
+                if (opposingConnections.Contains(opposingConnection))
+                {
+                    AL_LOG("FindAndLinkCompatibleRailroadConnection:\tCompatible connections already share an opposing connection %s on track %s which would create a switch too close to another switch. Aborting linking.",
+                        *opposingConnection->GetName(),
+                        *opposingConnection->GetTrack()->GetName());
+                    return;
+                }
+
+                opposingConnections.Add(opposingConnection);
+            }
+        }
     }
 
     // At the time this runs, the game has already created graph IDs and calculated overlapping tracks while thinking they are
     // not connected (if they're connected, the code will not treat them as overlapping).  If the tracks are curved very tightly,
     // they can ever-so-slightly overlap and get tracked as overlapping, which can confuse the game into thinking there are rail
     // signal loops if we just simply connect them. Also, regardless of overlap, if you JUST connect the tracks and don't force
-    // the game to recalculate graphs and signal blocks here, that creates edge cases that messes up other rail signals.
+    // the game to fully recalculate graphs and signal blocks here, that creates edge cases that messes up other rail signals.
     // 
     // Side note: all of these get fixed when the game gets reloaded and all rail stuff is calculated from scratch, which is comforting
-    // but obviously terrible user experience.
+    // but obviously not what we want.
     // 
-    // We can cover all but one known scenario by removing the current track, connecting it, then re-adding it and forcing recalculation.
-    // This also updates the overlapping calculations of the current track to NOT include the candidate.  But we have to iterate over
-    // the compatible connections and ensure they are each individually not overlapping and know they are not overlapping.
+    // We can fix the current track entirely by removing it from the subsystem, connecting it to appropriate candidates, then re-adding it
+    // and forcing recalculation. This queues graph rebuilds and updates the overlapping calculations of the current track to NOT include
+    // any candidates. To ensure the overlapping tracks are correct on the compatible connection tracks, we just explicitly update their
+    // overlapping tracks after the connection is made.
 
-    if (compatibleConnections.Num() > 0)
+    if (numCompatibleConnections > 0)
     {
         auto connectionTrack = connectionComponent->GetTrack();
 
@@ -1061,11 +1116,11 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
 
         for (auto compatibleConnection : compatibleConnections)
         {
-            auto compatibleTrack = compatibleConnection->GetTrack();
-            if (compatibleTrack->mOverlappingTracks.Contains(connectionTrack))
+            auto linkedTrack = compatibleConnection->GetTrack();
+            if (linkedTrack->mOverlappingTracks.Contains(connectionTrack))
             {
-                AL_LOG("FindAndLinkCompatibleRailroadConnection:\tTrack %s still thinks it's overlapping the base track. Updating it.", *compatibleTrack->GetName());
-                compatibleTrack->UpdateOverlappingTracks();
+                AL_LOG("FindAndLinkCompatibleRailroadConnection:\tTrack %s still thinks it's overlapping the base track. Updating it.", *linkedTrack->GetName());
+                linkedTrack->UpdateOverlappingTracks();
             }
         }
     }

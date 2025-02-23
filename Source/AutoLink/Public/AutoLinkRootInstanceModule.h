@@ -14,6 +14,8 @@
 
 #include "AutoLinkRootInstanceModule.generated.h"
 
+#define MAX_CONNECTIONS_PER_RAIL_CONNECTOR 3
+
 UCLASS()
 class AUTOLINK_API UAutoLinkRootInstanceModule : public UGameInstanceModule
 {

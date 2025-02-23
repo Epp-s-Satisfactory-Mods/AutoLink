@@ -54,7 +54,7 @@ void AutoLinkDebugging::RegisterDebugHooks()
                 return;
             }
 
-            AL_LOG("UFGBuildGunState::OnRecipeSampled. Actor is %s (%s) at %x.", *actor->GetName(), *actor->GetClass()->GetName(), actor);
+            AL_LOG("UFGBuildGunState::OnRecipeSampled. Actor is %s (%s) at %s.", *actor->GetName(), *actor->GetClass()->GetName(), *actor->GetActorTransform().ToString());
 
             bool dumpedAtLeastOnce = false;
             if (auto conveyorLift = Cast<AFGBuildableConveyorLift>(actor))
