@@ -779,7 +779,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
             else if (outerBuildable->IsA(AFGBuildableStorage::StaticClass()))
             {
                 minConnectorOffset -= 10.0f;
-                AL_LOG("FindAndLinkCompatibleBeltConnection:\tStorage container to conveyor. Settings min connector offset to %f to handle alignment issues.", minConnectorOffset);
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tStorage container to conveyor. Setting min connector offset to %f to handle alignment issues.", minConnectorOffset);
             }
         }
         else if (connectionDirection == EFactoryConnectionDirection::FCD_OUTPUT && (connectionConveyorBelt || connectionConveyorLift))
@@ -826,7 +826,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         {
             if (minConnectorOffset > 0 || maxConnectorOffset < 0)
             {
-                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are touching but this is not allowed per the connector offsets!");
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are touching but this is not allowed per the connector offset limits!");
                 continue;
             }
 
