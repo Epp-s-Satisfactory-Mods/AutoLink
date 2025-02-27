@@ -757,9 +757,18 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
 
         if (connectionConveyorBelt || candidateConveyorBelt)
         {
-            // If there's a belt involved, leave the offsets at 0, since belts have to be up against the connector
-            // (unless a storage container or dimensional depot are involved, but we handle those later).
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tBelt involved. Leaving offsets at 0 for now.");
+            if (connectionConveyorLift || candidateConveyorLift)
+            {
+                // If it's a belt to conveyor lift, we allow the same distance that the lifts can extend to connect when building them normally
+                maxConnectorOffset = 200.0;
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tBelt to conveyor lift. Setting max offset to %f.", maxConnectorOffset);
+            }
+            else
+            {
+                // If a belt to a non-lift, leave the offsets at 0, since belts have to be up against the connector
+                // (unless a storage container or dimensional depot are involved, but we handle those later).
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tBelt to non-lift. Leaving offsets at 0 for now.");
+            }
         }
         else if (connectionConveyorLift || candidateConveyorLift)
         {
