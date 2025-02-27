@@ -27,6 +27,14 @@ public:
 
     virtual void DispatchLifecycleEvent(ELifecyclePhase phase) override;
 
+    UPROPERTY(EditAnywhere, Category = "AutoLink Types")
+    TSoftClassPtr<AFGBuildableRailroadSwitchControl> RailroadSwitchControlBlueprintClass;
+    UPROPERTY(EditAnywhere, Category = "AutoLink Types")
+    TSoftClassPtr<UFGRecipe> RailroadSwitchControlRecipeBlueprintClass;
+
+    static inline TSubclassOf<AFGBuildableRailroadSwitchControl> RailRoadSwitchControlClass = nullptr;
+    static inline TSubclassOf<UFGRecipe> RailRoadSwitchControlRecipeClass = nullptr;
+
     static bool ShouldTryToAutoLink(AFGBuildable* buildable);
     static void FindAndLinkForBuildable(AFGBuildable* buildable);
 

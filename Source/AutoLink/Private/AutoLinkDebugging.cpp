@@ -19,6 +19,7 @@
 #include "FGBuildGun.h"
 #include "FGBuildGunBuild.h"
 #include "FGFluidIntegrantInterface.h"
+#include "FGMaterialEffect_Build.h"
 #include "FGPipeSubsystem.h"
 #include "FGRailroadTrackConnectionComponent.h"
 #include "FGRailroadSignalHologram.h"
@@ -29,10 +30,10 @@ void AutoLinkDebugging::RegisterDebugHooks()
     // So we can inspect object connections in the world by middle-clicking on them
     SUBSCRIBE_METHOD(
         UFGBuildGunState::OnRecipeSampled,
-        [](auto& scope, UFGBuildGunState* buildGunState, TSubclassOf<class UFGRecipe> recipe)
+        [](auto& scope, UFGBuildGunState* self, TSubclassOf<class UFGRecipe> recipe)
         {
             // Resolve the actor at the hit result
-            auto buildGun = buildGunState->GetBuildGun();
+            auto buildGun = self->GetBuildGun();
             auto& hitResult = buildGun->GetHitResult();
             auto actor = hitResult.GetActor();
             if (actor && actor->IsA(AAbstractInstanceManager::StaticClass()))
@@ -50,7 +51,7 @@ void AutoLinkDebugging::RegisterDebugHooks()
             if (!actor)
             {
                 AL_LOG("UFGBuildGunState::OnRecipeSampled. No actor resolved.");
-                scope(buildGunState, recipe);
+                scope(self, recipe);
                 return;
             }
 
@@ -109,7 +110,7 @@ void AutoLinkDebugging::RegisterDebugHooks()
 
             AL_LOG("UFGBuildGunState::OnRecipeSampled. Actor %s (%s) at %x dumped.", *actor->GetName(), *actor->GetClass()->GetName(), actor);
 
-            scope(buildGunState, recipe);
+            scope(self, recipe);
         });
 
     if (!AL_DEBUG_ENABLE_MOD)
@@ -359,9 +360,17 @@ void AutoLinkDebugging::RegisterBuildEffectTraceHooks()
     /* AFGBuildable */
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, PlayBuildEffects, [](auto& scope, AFGBuildable* self, AActor* inInstigator) {
-        AL_LOG("AFGBuildable::PlayBuildEffects START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        AL_LOG("AFGBuildable::PlayBuildEffects START %s (%s). inInstigator: %s (%s)", *self->GetName(), *self->GetClass()->GetName(), *inInstigator->GetName(), *inInstigator->GetClass()->GetName());
         scope(self, inInstigator);
         AL_LOG("AFGBuildable::PlayBuildEffects END");
+        });
+
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, GetBuildEffectTemplate_Implementation, [](auto& scope, const AFGBuildable* self) {
+        AL_LOG("AFGBuildable::GetBuildEffectTemplate_Implementation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        TSoftClassPtr<UFGMaterialEffect_Build> result = scope(self);
+        auto materialEffect = Cast<UFGMaterialEffect_Build>(result.LoadSynchronous());
+        DumpMaterialEffect("AFGBuildable::GetBuildEffectTemplate_Implementation END", materialEffect);
+        return result;
         });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, ExecutePlayBuildEffects, [](auto& scope, AFGBuildable* self) {
@@ -377,7 +386,7 @@ void AutoLinkDebugging::RegisterBuildEffectTraceHooks()
         });
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, PlayBuildEffectActor, [](auto& scope, AFGBuildable* self, AActor* inInstigator) {
-        AL_LOG("AFGBuildable::PlayBuildEffectActor START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        AL_LOG("AFGBuildable::PlayBuildEffectActor START %s (%s). Instigator: %s (%s)", *self->GetName(), *self->GetClass()->GetName(), *inInstigator->GetName(), *inInstigator->GetClass()->GetName());
         scope(self, inInstigator);
         AL_LOG("AFGBuildable::PlayBuildEffectActor END");
         });
@@ -421,7 +430,7 @@ void AutoLinkDebugging::RegisterBuildEffectTraceHooks()
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, ShouldSkipBuildEffect, [](auto& scope, AFGBuildable* self) {
         AL_LOG("AFGBuildable::ShouldSkipBuildEffect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
         auto result = scope(self);
-        AL_LOG("AFGBuildable::ShouldSkipBuildEffect END");
+        AL_LOG("AFGBuildable::ShouldSkipBuildEffect END %d", result);
         return result;
         });
 
@@ -575,32 +584,32 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
 {
     /* UFGRailroadTrackConnectionComponent */
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, AddConnection, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::AddConnection START %s on %s adding %s on %s", *self->GetName(), *self->GetOuter()->GetName(), *toComponent->GetName(), *toComponent->GetOuter()->GetName());
-        scope(self, toComponent);
-        AL_LOG("UFGRailroadTrackConnectionComponent::AddConnection END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, AddConnection, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::AddConnection START %s on %s adding %s on %s", *self->GetName(), *self->GetOuter()->GetName(), *toComponent->GetName(), *toComponent->GetOuter()->GetName());
+    //    scope(self, toComponent);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::AddConnection END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, RemoveConnection, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
-        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnection START", self->GetTrack(), false);
-        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnection START", self, true);
-        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnection START", toComponent, true);
-        scope(self, toComponent);
-        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnection END", self->GetTrack(), false);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, RemoveConnection, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
+    //    DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnection START", self->GetTrack(), false);
+    //    DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnection START", self, true);
+    //    DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnection START", toComponent, true);
+    //    scope(self, toComponent);
+    //    DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnection END", self->GetTrack(), false);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, IsOccupied, [](auto& scope, const UFGRailroadTrackConnectionComponent* self, float distance) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::IsOccupied START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto isOccupied = scope(self, distance);
-        AL_LOG("UFGRailroadTrackConnectionComponent::IsOccupied END");
-        return isOccupied;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, IsOccupied, [](auto& scope, const UFGRailroadTrackConnectionComponent* self, float distance) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::IsOccupied START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto isOccupied = scope(self, distance);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::IsOccupied END");
+    //    return isOccupied;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, IsFacingSwitch, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::IsFacingSwitch START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::IsFacingSwitch END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, IsFacingSwitch, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::IsFacingSwitch START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::IsFacingSwitch END");
+    //    });
 
     //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, IsTrailingSwitch, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
     //    AL_LOG("UFGRailroadTrackConnectionComponent::IsTrailingSwitch START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
@@ -627,97 +636,98 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
         return value;
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetStation, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetStation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto value = scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetStation END");
-        return value;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetStation, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetStation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto value = scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetStation END");
+    //    return value;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetFacingSignal, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetFacingSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto value = scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetFacingSignal END");
-        return value;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetFacingSignal, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetFacingSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto value = scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetFacingSignal END");
+    //    return value;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetTrailingSignal, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetTrailingSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto value = scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetTrailingSignal END");
-        return value;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetTrailingSignal, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetTrailingSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto value = scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetTrailingSignal END");
+    //    return value;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetSignalBlock, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetSignalBlock START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto value = scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetSignalBlock END");
-        return value;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetSignalBlock, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetSignalBlock START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto value = scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetSignalBlock END");
+    //    return value;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetOpposite, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetOpposite START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto value = scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetOpposite END");
-        return value;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetOpposite, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetOpposite START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto value = scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetOpposite END");
+    //    return value;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetNext, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetNext START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto value = scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::GetNext END");
-        return value;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, GetNext, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetNext START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto value = scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::GetNext END");
+    //    return value;
+    //    });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetSwitchControl, [](auto& scope, UFGRailroadTrackConnectionComponent* self, AFGBuildableRailroadSwitchControl* control) {
         AL_LOG("UFGRailroadTrackConnectionComponent::SetSwitchControl START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+        DumpRailSwitchControl("UFGRailroadTrackConnectionComponent::SetSwitchControl START", control, true);
         scope(self, control);
         AL_LOG("UFGRailroadTrackConnectionComponent::SetSwitchControl END");
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetStation, [](auto& scope, UFGRailroadTrackConnectionComponent* self, AFGBuildableRailroadStation* station) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::SetStation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, station);
-        AL_LOG("UFGRailroadTrackConnectionComponent::SetStation END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetStation, [](auto& scope, UFGRailroadTrackConnectionComponent* self, AFGBuildableRailroadStation* station) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::SetStation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self, station);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::SetStation END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetFacingSignal, [](auto& scope, UFGRailroadTrackConnectionComponent* self, AFGBuildableRailroadSignal* signal) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::SetFacingSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, signal);
-        AL_LOG("UFGRailroadTrackConnectionComponent::SetFacingSignal END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetFacingSignal, [](auto& scope, UFGRailroadTrackConnectionComponent* self, AFGBuildableRailroadSignal* signal) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::SetFacingSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self, signal);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::SetFacingSignal END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetTrackPosition, [](auto& scope, UFGRailroadTrackConnectionComponent* self, const FRailroadTrackPosition& position) {
-        DumpRailTrackPosition(FString::Printf(TEXT("UFGRailroadTrackConnectionComponent::SetTrackPosition START %s on %s"), *self->GetName(), *self->GetOuter()->GetName()), &position);
-        scope(self, position);
-        DumpRailConnection("UFGRailroadTrackConnectionComponent::SetTrackPosition END", self, false);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetTrackPosition, [](auto& scope, UFGRailroadTrackConnectionComponent* self, const FRailroadTrackPosition& position) {
+    //    DumpRailTrackPosition(FString::Printf(TEXT("UFGRailroadTrackConnectionComponent::SetTrackPosition START %s on %s"), *self->GetName(), *self->GetOuter()->GetName()), &position);
+    //    scope(self, position);
+    //    DumpRailConnection("UFGRailroadTrackConnectionComponent::SetTrackPosition END", self, false);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SortConnections, [](auto& scope, UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::SortConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::SortConnections END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SortConnections, [](auto& scope, UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::SortConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::SortConnections END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, AddConnectionInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::AddConnectionInternal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, toComponent);
-        AL_LOG("UFGRailroadTrackConnectionComponent::AddConnectionInternal END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, AddConnectionInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::AddConnectionInternal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self, toComponent);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::AddConnectionInternal END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, RemoveConnectionInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
-        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", self->GetTrack(), false);
-        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", self, true);
-        DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", toComponent, true);
-        scope(self, toComponent);
-        DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal END", self->GetTrack(), false);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, RemoveConnectionInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self, UFGRailroadTrackConnectionComponent* toComponent) {
+    //    DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", self->GetTrack(), false);
+    //    DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", self, true);
+    //    DumpRailConnection("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal START", toComponent, true);
+    //    scope(self, toComponent);
+    //    DumpRailTrack("UFGRailroadTrackConnectionComponent::RemoveConnectionInternal END", self->GetTrack(), false);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, OnConnectionsChangedInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::OnConnectionsChangedInternal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::OnConnectionsChangedInternal END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, OnConnectionsChangedInternal, [](auto& scope, UFGRailroadTrackConnectionComponent* self) {
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::OnConnectionsChangedInternal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("UFGRailroadTrackConnectionComponent::OnConnectionsChangedInternal END");
+    //    });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, ClampSwitchPosition, [](auto& scope, UFGRailroadTrackConnectionComponent* self) {
         AL_LOG("UFGRailroadTrackConnectionComponent::ClampSwitchPosition START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
@@ -725,75 +735,82 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
         AL_LOG("UFGRailroadTrackConnectionComponent::ClampSwitchPosition END");
         });
 
+    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetSwitchControl, [](auto& scope, UFGRailroadTrackConnectionComponent* self, AFGBuildableRailroadSwitchControl* control) {
+        AL_LOG("UFGRailroadTrackConnectionComponent::SetSwitchControl START %s, %s", *self->GetName(), *control->GetName());
+        scope(self, control);
+        AL_LOG("UFGRailroadTrackConnectionComponent::SetSwitchControl END");
+        });
+
+
     /* AFGBuildableRailroadSignal */
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, BeginPlay, [](auto& scope, AFGBuildableRailroadSignal* self) {
-        DumpRailSignal("AFGBuildableRailroadSignal::BeginPlay START", self);
-        scope(self);
-        DumpRailSignal("AFGBuildableRailroadSignal::BeginPlay END", self);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, BeginPlay, [](auto& scope, AFGBuildableRailroadSignal* self) {
+    //    DumpRailSignal("AFGBuildableRailroadSignal::BeginPlay START", self);
+    //    scope(self);
+    //    DumpRailSignal("AFGBuildableRailroadSignal::BeginPlay END", self);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetGuardedConnections, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::GetGuardedConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::GetGuardedConnections END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetGuardedConnections, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::GetGuardedConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::GetGuardedConnections END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetObservedConnections, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::GetObservedConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::GetObservedConnections END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetObservedConnections, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::GetObservedConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::GetObservedConnections END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, HasValidConnections, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::HasValidConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto val = scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::HasValidConnections END. Ret: %d", val);
-        return val;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, HasValidConnections, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::HasValidConnections START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto val = scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::HasValidConnections END. Ret: %d", val);
+    //    return val;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetAspect, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::GetAspect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::GetAspect END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetAspect, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::GetAspect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::GetAspect END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetBlockValidation, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::GetBlockValidation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::GetBlockValidation END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetBlockValidation, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::GetBlockValidation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::GetBlockValidation END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, HasObservedBlock, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::HasObservedBlock START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto val = scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::HasObservedBlock END Ret: %d", val);
-        return val;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, HasObservedBlock, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::HasObservedBlock START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    auto val = scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::HasObservedBlock END Ret: %d", val);
+    //    return val;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetObservedBlock, [](auto& scope, AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::GetObservedBlock START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::GetObservedBlock END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetObservedBlock, [](auto& scope, AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::GetObservedBlock START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::GetObservedBlock END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, IsPathSignal, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::IsPathSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::IsPathSignal END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, IsPathSignal, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::IsPathSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::IsPathSignal END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, IsBiDirectional, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::IsBiDirectional START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::IsBiDirectional END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, IsBiDirectional, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::IsBiDirectional START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::IsBiDirectional END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetVisualState, [](auto& scope, const AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::GetVisualState START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::GetVisualState END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, GetVisualState, [](auto& scope, const AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::GetVisualState START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::GetVisualState END");
+    //    });
 
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, OnAspectChanged, [](auto& scope, AFGBuildableRailroadSignal* self) {
     //    AL_LOG("AFGBuildableRailroadSignal::OnAspectChanged START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
@@ -825,11 +842,11 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //    AL_LOG("AFGBuildableRailroadSignal::OnDrawDebugVisualState END");
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, DisconnectSignal, [](auto& scope, AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::DisconnectSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::DisconnectSignal END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, DisconnectSignal, [](auto& scope, AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::DisconnectSignal START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::DisconnectSignal END");
+    //    });
 
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateVisuals, [](auto& scope, AFGBuildableRailroadSignal* self) {
     //    AL_LOG("AFGBuildableRailroadSignal::UpdateVisuals START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
@@ -837,38 +854,38 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //    DumpRailSignal("AFGBuildableRailroadSignal::UpdateVisuals END", self);
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, ApplyVisualState, [](auto& scope, AFGBuildableRailroadSignal* self, int16 state) {
-        AL_LOG("AFGBuildableRailroadSignal::ApplyVisualState START %s (%s), state %d", *self->GetName(), *self->GetClass()->GetName(), state);
-        scope(self, state);
-        AL_LOG("AFGBuildableRailroadSignal::ApplyVisualState END %s", *self->GetName());
-        //DumpRailSignal("AFGBuildableRailroadSignal::ApplyVisualState END", self);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, ApplyVisualState, [](auto& scope, AFGBuildableRailroadSignal* self, int16 state) {
+    //    AL_LOG("AFGBuildableRailroadSignal::ApplyVisualState START %s (%s), state %d", *self->GetName(), *self->GetClass()->GetName(), state);
+    //    scope(self, state);
+    //    AL_LOG("AFGBuildableRailroadSignal::ApplyVisualState END %s", *self->GetName());
+    //    //DumpRailSignal("AFGBuildableRailroadSignal::ApplyVisualState END", self);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, AddGuardedConnection, [](auto& scope, AFGBuildableRailroadSignal* self, UFGRailroadTrackConnectionComponent* connection) {
-        AL_LOG("AFGBuildableRailroadSignal::AddGuardedConnection START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, connection);
-        DumpRailSignal("AFGBuildableRailroadSignal::AddGuardedConnection END", self);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, AddGuardedConnection, [](auto& scope, AFGBuildableRailroadSignal* self, UFGRailroadTrackConnectionComponent* connection) {
+    //    AL_LOG("AFGBuildableRailroadSignal::AddGuardedConnection START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self, connection);
+    //    DumpRailSignal("AFGBuildableRailroadSignal::AddGuardedConnection END", self);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, AddObservedConnection, [](auto& scope, AFGBuildableRailroadSignal* self, UFGRailroadTrackConnectionComponent* connection) {
-        AL_LOG("AFGBuildableRailroadSignal::AddObservedConnection START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, connection);
-        DumpRailSignal("AFGBuildableRailroadSignal::AddObservedConnection END", self);
-        //AL_LOG("AFGBuildableRailroadSignal::AddObservedConnection END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, AddObservedConnection, [](auto& scope, AFGBuildableRailroadSignal* self, UFGRailroadTrackConnectionComponent* connection) {
+    //    AL_LOG("AFGBuildableRailroadSignal::AddObservedConnection START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //    scope(self, connection);
+    //    DumpRailSignal("AFGBuildableRailroadSignal::AddObservedConnection END", self);
+    //    //AL_LOG("AFGBuildableRailroadSignal::AddObservedConnection END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateConnections, [](auto& scope, AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::UpdateConnections START %s", *self->GetName());
-        scope(self);
-        DumpRailSignal("AFGBuildableRailroadSignal::UpdateConnections END", self);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateConnections, [](auto& scope, AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::UpdateConnections START %s", *self->GetName());
+    //    scope(self);
+    //    DumpRailSignal("AFGBuildableRailroadSignal::UpdateConnections END", self);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, SetObservedBlock, [](auto& scope, AFGBuildableRailroadSignal* self, TWeakPtr< FFGRailroadSignalBlock > block) {
-        AL_LOG("AFGBuildableRailroadSignal::SetObservedBlock START %s Block: %d", *self->GetName(), (block.IsValid() ? block.Pin().Get()->ID : -1 ));
-        //DumpRailSignalBlock("AFGBuildableRailroadSignal::SetObservedBlock START", block.Pin().Get());
-        scope(self, block);
-        AL_LOG("AFGBuildableRailroadSignal::SetObservedBlock END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, SetObservedBlock, [](auto& scope, AFGBuildableRailroadSignal* self, TWeakPtr< FFGRailroadSignalBlock > block) {
+    //    AL_LOG("AFGBuildableRailroadSignal::SetObservedBlock START %s Block: %d", *self->GetName(), (block.IsValid() ? block.Pin().Get()->ID : -1 ));
+    //    //DumpRailSignalBlock("AFGBuildableRailroadSignal::SetObservedBlock START", block.Pin().Get());
+    //    scope(self, block);
+    //    AL_LOG("AFGBuildableRailroadSignal::SetObservedBlock END");
+    //    });
 
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, OnBlockChanged, [](auto& scope, AFGBuildableRailroadSignal* self) {
     //    AL_LOG("AFGBuildableRailroadSignal::OnBlockChanged START %s", *self->GetName());
@@ -876,59 +893,59 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //    DumpRailSignal("AFGBuildableRailroadSignal::OnBlockChanged END", self);
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateDirectionality, [](auto& scope, AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::UpdateDirectionality START %s", *self->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::UpdateDirectionality END %s", *self->GetName());
-        //DumpRailSignal("AFGBuildableRailroadSignal::UpdateDirectionality END", self);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateDirectionality, [](auto& scope, AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::UpdateDirectionality START %s", *self->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::UpdateDirectionality END %s", *self->GetName());
+    //    //DumpRailSignal("AFGBuildableRailroadSignal::UpdateDirectionality END", self);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateAspect, [](auto& scope, AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::UpdateAspect START %s", *self->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::UpdateAspect END %s", *self->GetName());
-        //DumpRailSignal("AFGBuildableRailroadSignal::UpdateAspect END", self);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateAspect, [](auto& scope, AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::UpdateAspect START %s", *self->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::UpdateAspect END %s", *self->GetName());
+    //    //DumpRailSignal("AFGBuildableRailroadSignal::UpdateAspect END", self);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateBlockValidation, [](auto& scope, AFGBuildableRailroadSignal* self) {
-        AL_LOG("AFGBuildableRailroadSignal::UpdateBlockValidation START %s", *self->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadSignal::UpdateBlockValidation END %s", *self->GetName());
-        //DumpRailSignal("AFGBuildableRailroadSignal::UpdateBlockValidation END", self);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSignal, UpdateBlockValidation, [](auto& scope, AFGBuildableRailroadSignal* self) {
+    //    AL_LOG("AFGBuildableRailroadSignal::UpdateBlockValidation START %s", *self->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadSignal::UpdateBlockValidation END %s", *self->GetName());
+    //    //DumpRailSignal("AFGBuildableRailroadSignal::UpdateBlockValidation END", self);
+    //    });
 
     /* AFGBuildableRailroadTrack */
 
     SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, BeginPlay, [](auto& scope, AFGBuildableRailroadTrack* self) {
-        DumpRailTrack("AFGBuildableRailroadTrack::BeginPlay START", self, false);
+        DumpRailTrack("AFGBuildableRailroadTrack::BeginPlay START", self, true);
         scope(self);
-        DumpRailTrack("AFGBuildableRailroadTrack::BeginPlay END", self, false);
+        DumpRailTrack("AFGBuildableRailroadTrack::BeginPlay END", self, true);
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, IsOccupied, [](auto& scope, const AFGBuildableRailroadTrack* self) {
-        DumpRailTrack("AFGBuildableRailroadTrack::IsOccupied START", self, false);
-        scope(self);
-        DumpRailTrack("AFGBuildableRailroadTrack::IsOccupied END", self, true);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, IsOccupied, [](auto& scope, const AFGBuildableRailroadTrack* self) {
+    //    DumpRailTrack("AFGBuildableRailroadTrack::IsOccupied START", self, false);
+    //    scope(self);
+    //    DumpRailTrack("AFGBuildableRailroadTrack::IsOccupied END", self, true);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, HasSignalBlock, [](auto& scope, const AFGBuildableRailroadTrack* self) {
-        AL_LOG("AFGBuildableRailroadTrack::HasSignalBlock START %s", *self->GetName());
-        auto val = scope(self);
-        AL_LOG("AFGBuildableRailroadTrack::HasSignalBlock END Ret: %d", val);
-        return val;
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, HasSignalBlock, [](auto& scope, const AFGBuildableRailroadTrack* self) {
+    //    AL_LOG("AFGBuildableRailroadTrack::HasSignalBlock START %s", *self->GetName());
+    //    auto val = scope(self);
+    //    AL_LOG("AFGBuildableRailroadTrack::HasSignalBlock END Ret: %d", val);
+    //    return val;
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, GetSignalBlock, [](auto& scope, const AFGBuildableRailroadTrack* self) {
-        AL_LOG("AFGBuildableRailroadTrack::GetSignalBlock START %s", *self->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadTrack::GetSignalBlock END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, GetSignalBlock, [](auto& scope, const AFGBuildableRailroadTrack* self) {
+    //    AL_LOG("AFGBuildableRailroadTrack::GetSignalBlock START %s", *self->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadTrack::GetSignalBlock END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, UpdateOverlappingTracks, [](auto& scope, AFGBuildableRailroadTrack* self) {
-        AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks START %s", *self->GetName());
-        scope(self);
-        AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks END %s", *self->GetName());
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, UpdateOverlappingTracks, [](auto& scope, AFGBuildableRailroadTrack* self) {
+    //    AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks START %s", *self->GetName());
+    //    scope(self);
+    //    AL_LOG("AFGBuildableRailroadTrack::UpdateOverlappingTracks END %s", *self->GetName());
+    //    });
 
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, GetOverlappingTracks, [](auto& scope, AFGBuildableRailroadTrack* self) {
     //    DumpRailTrack("AFGBuildableRailroadTrack::GetOverlappingTracks START", self, true);
@@ -936,11 +953,11 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //    DumpRailTrack("AFGBuildableRailroadTrack::GetOverlappingTracks END", self, true);
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, AddOverlappingTrack, [](auto& scope, AFGBuildableRailroadTrack* self, AFGBuildableRailroadTrack* track) {
-        DumpRailTrack("AFGBuildableRailroadTrack::AddOverlappingTrack START", self, true);
-        scope(self, track);
-        DumpRailTrack("AFGBuildableRailroadTrack::AddOverlappingTrack END", self, false);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, AddOverlappingTrack, [](auto& scope, AFGBuildableRailroadTrack* self, AFGBuildableRailroadTrack* track) {
+    //    DumpRailTrack("AFGBuildableRailroadTrack::AddOverlappingTrack START", self, true);
+    //    scope(self, track);
+    //    DumpRailTrack("AFGBuildableRailroadTrack::AddOverlappingTrack END", self, false);
+    //    });
 
     //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, PostSerializedFromBlueprint, [](auto& scope, AFGBuildableRailroadTrack* self, bool isBlueprintWorld) {
     //    DumpRailTrack(FString::Printf(TEXT("AFGBuildableRailroadTrack::PostSerializedFromBlueprint START isBlueprintWorld: %d"), isBlueprintWorld), self, true);
@@ -948,23 +965,23 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //    DumpRailTrack("AFGBuildableRailroadTrack::PostSerializedFromBlueprint END", self, false);
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, SetTrackGraphID, [](auto& scope, AFGBuildableRailroadTrack* self, int32 trackGraphID) {
-        AL_LOG("AFGBuildableRailroadTrack::SetTrackGraphID START %s trackGraphID: %d", *self->GetName(), trackGraphID);
-        scope(self, trackGraphID);
-        AL_LOG("AFGBuildableRailroadTrack::SetTrackGraphID END");
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, SetTrackGraphID, [](auto& scope, AFGBuildableRailroadTrack* self, int32 trackGraphID) {
+    //    AL_LOG("AFGBuildableRailroadTrack::SetTrackGraphID START %s trackGraphID: %d", *self->GetName(), trackGraphID);
+    //    scope(self, trackGraphID);
+    //    AL_LOG("AFGBuildableRailroadTrack::SetTrackGraphID END");
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, SetSignalBlock, [](auto& scope, AFGBuildableRailroadTrack* self, TWeakPtr< FFGRailroadSignalBlock > block) {
-        DumpRailTrack("AFGBuildableRailroadTrack::SetSignalBlock START", self, true);
-        scope(self, block);
-        DumpRailTrack("AFGBuildableRailroadTrack::SetSignalBlock END", self, false);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, SetSignalBlock, [](auto& scope, AFGBuildableRailroadTrack* self, TWeakPtr< FFGRailroadSignalBlock > block) {
+    //    DumpRailTrack("AFGBuildableRailroadTrack::SetSignalBlock START", self, true);
+    //    scope(self, block);
+    //    DumpRailTrack("AFGBuildableRailroadTrack::SetSignalBlock END", self, false);
+    //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, SetupConnections, [](auto& scope, AFGBuildableRailroadTrack* self) {
-        DumpRailTrack("AFGBuildableRailroadTrack::SetupConnections START", self, true);
-        scope(self);
-        DumpRailTrack("AFGBuildableRailroadTrack::SetupConnections END", self, false);
-        });
+    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadTrack, SetupConnections, [](auto& scope, AFGBuildableRailroadTrack* self) {
+    //    DumpRailTrack("AFGBuildableRailroadTrack::SetupConnections START", self, true);
+    //    scope(self);
+    //    DumpRailTrack("AFGBuildableRailroadTrack::SetupConnections END", self, false);
+    //    });
 
     ///* AFGRailroadSignalHologram */
 
@@ -988,111 +1005,174 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //        DumpRailTrackPosition(TEXT("AFGRailroadSubsystem::MoveTrackPosition END"), &position);
     //    });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddTrack,
-        [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddTrack,
+    //    [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
+    //    {
+    //        DumpRailTrack("AFGRailroadSubsystem::AddTrack START", track, false);
+    //        scope(self, track);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::AddTrack END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveTrack,
+    //    [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
+    //    {
+    //        DumpRailTrack("AFGRailroadSubsystem::RemoveTrack START", track, false);
+    //        scope(self, track);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::RemoveTrack END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddSignal,
+    //    [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadSignal* signal)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::AddSignal START %s (%s). signal: %s", *self->GetName(), *self->GetClass()->GetName(), *signal->GetName());
+    //        scope(self, signal);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::AddSignal END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveSignal,
+    //    [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadSignal* signal)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::RemoveSignal START %s (%s). signal: %s", *self->GetName(), *self->GetClass()->GetName(), *signal->GetName());
+    //        scope(self, signal);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::RemoveSignal END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RebuildTrackGraph,
+    //    [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::RebuildTrackGraph START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::RebuildTrackGraph START", self);
+    //        scope(self, graphID);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::RebuildTrackGraph END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RebuildSignalBlocks,
+    //    [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::RebuildSignalBlocks START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
+    //        scope.Cancel();
+    //        RebuildSignalBlocks(self, graphID);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::RebuildSignalBlocks END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, MergeTrackGraphs,
+    //    [](auto& scope, AFGRailroadSubsystem* self, int32 first, int32 second)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::MergeTrackGraphs START %s (%s). first %d, second %d", *self->GetName(), *self->GetClass()->GetName(), first, second);
+    //        scope(self, first, second);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::MergeTrackGraphs END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, CreateTrackGraph,
+    //    [](auto& scope, AFGRailroadSubsystem* self)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::CreateTrackGraph START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+    //        scope(self);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::CreateTrackGraph END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveTrackGraph,
+    //    [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::RemoveTrackGraph START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
+    //        scope(self, graphID);
+    //        DumpRailSubsystem("AFGRailroadSubsystem::RemoveTrackGraph END", self);
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddTrackToGraph,
+    //    [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track, int32 graphID)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::AddTrackToGraph START %s (%s). track: %s, graphID %d", *self->GetName(), *self->GetClass()->GetName(), *track->GetName(), graphID);
+    //        scope(self, track, graphID);
+    //        AL_LOG("AFGRailroadSubsystem::AddTrackToGraph END");
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveTrackFromGraph,
+    //    [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::RemoveTrackFromGraph START %s (%s). track: %s", *self->GetName(), *self->GetClass()->GetName(), *track->GetName());
+    //        scope(self, track);
+    //        AL_LOG("AFGRailroadSubsystem::RemoveTrackFromGraph END");
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, MarkGraphAsChanged,
+    //    [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::MarkGraphAsChanged START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
+    //        scope(self, graphID);
+    //        AL_LOG("AFGRailroadSubsystem::MarkGraphAsChanged END");
+    //    });
+
+    //SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, MarkGraphForFullRebuild,
+    //    [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
+    //    {
+    //        AL_LOG("AFGRailroadSubsystem::MarkGraphForFullRebuild START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
+    //        scope(self, graphID);
+    //        AL_LOG("AFGRailroadSubsystem::MarkGraphForFullRebuild END");
+    //    });
+
+    /* AFGBuildableRailroadSwitchControl */
+
+
+    SUBSCRIBE_UOBJECT_METHOD(AActor, SetActorHiddenInGame,
+        [](auto& scope, AActor* self, bool hidden)
         {
-            DumpRailTrack("AFGRailroadSubsystem::AddTrack START", track, false);
-            scope(self, track);
-            DumpRailSubsystem("AFGRailroadSubsystem::AddTrack END", self);
+            if (self->IsA(AFGBuildableRailroadSwitchControl::StaticClass()))
+            {
+                AL_LOG("AFGBuildableRailroadSwitchControl::SetActorHiddenInGame START %s (%s). Hidden: %d", *self->GetName(), *self->GetClass()->GetName(), hidden);
+                scope(self, hidden);
+                AL_LOG("AFGBuildableRailroadSwitchControl::SetActorHiddenInGame END");
+            }
+            else
+            {
+                scope(self, hidden);
+            }
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveTrack,
-        [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSwitchControl, BeginPlay,
+        [](auto& scope, AFGBuildableRailroadSwitchControl* self)
         {
-            DumpRailTrack("AFGRailroadSubsystem::RemoveTrack START", track, false);
-            scope(self, track);
-            DumpRailSubsystem("AFGRailroadSubsystem::RemoveTrack END", self);
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddSignal,
-        [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadSignal* signal)
-        {
-            AL_LOG("AFGRailroadSubsystem::AddSignal START %s (%s). signal: %s", *self->GetName(), *self->GetClass()->GetName(), *signal->GetName());
-            scope(self, signal);
-            DumpRailSubsystem("AFGRailroadSubsystem::AddSignal END", self);
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveSignal,
-        [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadSignal* signal)
-        {
-            AL_LOG("AFGRailroadSubsystem::RemoveSignal START %s (%s). signal: %s", *self->GetName(), *self->GetClass()->GetName(), *signal->GetName());
-            scope(self, signal);
-            DumpRailSubsystem("AFGRailroadSubsystem::RemoveSignal END", self);
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RebuildTrackGraph,
-        [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
-        {
-            AL_LOG("AFGRailroadSubsystem::RebuildTrackGraph START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
-            DumpRailSubsystem("AFGRailroadSubsystem::RebuildTrackGraph START", self);
-            scope(self, graphID);
-            DumpRailSubsystem("AFGRailroadSubsystem::RebuildTrackGraph END", self);
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RebuildSignalBlocks,
-        [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
-        {
-            AL_LOG("AFGRailroadSubsystem::RebuildSignalBlocks START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
-            scope.Cancel();
-            RebuildSignalBlocks(self, graphID);
-            DumpRailSubsystem("AFGRailroadSubsystem::RebuildSignalBlocks END", self);
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, MergeTrackGraphs,
-        [](auto& scope, AFGRailroadSubsystem* self, int32 first, int32 second)
-        {
-            AL_LOG("AFGRailroadSubsystem::MergeTrackGraphs START %s (%s). first %d, second %d", *self->GetName(), *self->GetClass()->GetName(), first, second);
-            scope(self, first, second);
-            DumpRailSubsystem("AFGRailroadSubsystem::MergeTrackGraphs END", self);
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, CreateTrackGraph,
-        [](auto& scope, AFGRailroadSubsystem* self)
-        {
-            AL_LOG("AFGRailroadSubsystem::CreateTrackGraph START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
+            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::BeginPlay START", self, false);
             scope(self);
-            DumpRailSubsystem("AFGRailroadSubsystem::CreateTrackGraph END", self);
+            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::BeginPlay END", self, false);
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveTrackGraph,
-        [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSwitchControl, EndPlay,
+        [](auto& scope, AFGBuildableRailroadSwitchControl* self, const EEndPlayReason::Type endPlayReason)
         {
-            AL_LOG("AFGRailroadSubsystem::RemoveTrackGraph START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
-            scope(self, graphID);
-            DumpRailSubsystem("AFGRailroadSubsystem::RemoveTrackGraph END", self);
+            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::EndPlay START", self, false);
+            scope(self, endPlayReason);
+            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::EndPlay END", self, false);
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, AddTrackToGraph,
-        [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track, int32 graphID)
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSwitchControl, OnBuildEffectFinished,
+        [](auto& scope, AFGBuildableRailroadSwitchControl* self)
         {
-            AL_LOG("AFGRailroadSubsystem::AddTrackToGraph START %s (%s). track: %s, graphID %d", *self->GetName(), *self->GetClass()->GetName(), *track->GetName(), graphID);
-            scope(self, track, graphID);
-            AL_LOG("AFGRailroadSubsystem::AddTrackToGraph END");
+            AL_LOG("AFGBuildableRailroadSwitchControl::OnBuildEffectFinished START %s", *self->GetName());
+            scope(self);
+            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::OnBuildEffectFinished END", self, false);
+            //AL_LOG("AFGBuildableRailroadSwitchControl::OnBuildEffectFinished END");
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, RemoveTrackFromGraph,
-        [](auto& scope, AFGRailroadSubsystem* self, AFGBuildableRailroadTrack* track)
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSwitchControl, OnBuildEffectActorFinished,
+        [](auto& scope, AFGBuildableRailroadSwitchControl* self)
         {
-            AL_LOG("AFGRailroadSubsystem::RemoveTrackFromGraph START %s (%s). track: %s", *self->GetName(), *self->GetClass()->GetName(), *track->GetName());
-            scope(self, track);
-            AL_LOG("AFGRailroadSubsystem::RemoveTrackFromGraph END");
+            AL_LOG("AFGBuildableRailroadSwitchControl::OnBuildEffectActorFinished START %s", *self->GetName());
+            scope(self);
+            AL_LOG("AFGBuildableRailroadSwitchControl::OnBuildEffectActorFinished END");
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, MarkGraphAsChanged,
-        [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
+    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSwitchControl, SetControlledConnection,
+        [](auto& scope, AFGBuildableRailroadSwitchControl* self, UFGRailroadTrackConnectionComponent* controlledConnection)
         {
-            AL_LOG("AFGRailroadSubsystem::MarkGraphAsChanged START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
-            scope(self, graphID);
-            AL_LOG("AFGRailroadSubsystem::MarkGraphAsChanged END");
+            //AL_LOG("AFGBuildableRailroadSwitchControl::SetControlledConnection START %s", *self->GetName());
+            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::SetControlledConnection START", self, false);
+            DumpRailConnection("AFGBuildableRailroadSwitchControl::SetControlledConnection START", controlledConnection, true);
+            scope(self, controlledConnection);
+            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::SetControlledConnection END", self, false);
+            //AL_LOG("AFGBuildableRailroadSwitchControl::SetControlledConnection END");
         });
 
-    SUBSCRIBE_UOBJECT_METHOD(AFGRailroadSubsystem, MarkGraphForFullRebuild,
-        [](auto& scope, AFGRailroadSubsystem* self, int32 graphID)
-        {
-            AL_LOG("AFGRailroadSubsystem::MarkGraphForFullRebuild START %s (%s). graphID %d", *self->GetName(), *self->GetClass()->GetName(), graphID);
-            scope(self, graphID);
-            AL_LOG("AFGRailroadSubsystem::MarkGraphForFullRebuild END");
-        });
 }
 
 void AutoLinkDebugging::RegisterPipeTraceHooks()
@@ -1485,7 +1565,7 @@ void AutoLinkDebugging::DumpRailConnection(FString prefix, const UFGRailroadTrac
 
     AL_LOG("%s UFGRailroadTrackConnectionComponent on %s", *prefix, *c->GetOuter()->GetName());
     auto nestedPrefix = GetNestedPrefix(prefix);
-
+    DumpRailSwitchControl(FString(nestedPrefix).Append(TEXT(" GetSwitchControl")), c->GetSwitchControl(), true);
     auto connections = c->GetConnections();
     int i = 0;
     AL_LOG("%s GetConnections: %d items", *nestedPrefix, connections.Num());
@@ -1493,15 +1573,13 @@ void AutoLinkDebugging::DumpRailConnection(FString prefix, const UFGRailroadTrac
     {
         AL_LOG("%s", *GetNestedPrefix(nestedPrefix).Appendf(TEXT(" GetConnections[%d] %s"), i++, *conn->GetOuter()->GetName()));
     }
-    DumpRailTrackPosition(FString(nestedPrefix).Append(TEXT(" mTrackPosition")), &c->mTrackPosition);
 
     if (shortDump) return;
 
+    DumpRailTrackPosition(FString(nestedPrefix).Append(TEXT(" mTrackPosition")), &c->mTrackPosition);
     AL_LOG("%s mSwitchPosition: %d", *nestedPrefix, c->mSwitchPosition);
     DumpRailSignal(FString(nestedPrefix).Append(TEXT(" mFacingSignal")), c->mFacingSignal);
     DumpRailSignal(FString(nestedPrefix).Append(TEXT(" mTrailingSignal")), c->mTrailingSignal);
-
-
 }
 
 void AutoLinkDebugging::DumpRailTrackPosition(FString prefix, const FRailroadTrackPosition* p)
@@ -1605,7 +1683,7 @@ void AutoLinkDebugging::DumpRailSignal(FString prefix, const AFGBuildableRailroa
     }
 
     DumpRailSignalBlock(FString(nestedPrefix).Append(TEXT(" mObservedBlock")), s->mObservedBlock.Pin().Get());
-    AL_LOG("%s mAspect: %d", *nestedPrefix, *GetEnumNameString(s->mAspect));
+    AL_LOG("%s mAspect: %s", *nestedPrefix, *GetEnumNameString(s->mAspect));
     AL_LOG("%s mBlockValidation: %s", *nestedPrefix, *GetEnumNameString(s->mBlockValidation));
     AL_LOG("%s mIsPathSignal: %d", *nestedPrefix, s->mIsPathSignal);
     AL_LOG("%s mIsBiDirectional: %d", *nestedPrefix, s->mIsBiDirectional);
@@ -1622,6 +1700,27 @@ void AutoLinkDebugging::DumpRailSignalBlock(FString prefix, const FFGRailroadSig
     }
 
     AL_LOG("%s FFGRailroadSignalBlock ID: %d at %p", *prefix, b->ID, b);
+}
+
+void AutoLinkDebugging::DumpRailSwitchControl(FString prefix, const AFGBuildableRailroadSwitchControl* c, bool shortDump)
+{
+    EnsureColon(prefix);
+    if (!c)
+    {
+        AL_LOG("%s AFGBuildableRailroadSwitchControl is null", *prefix);
+        return;
+    }
+
+    AL_LOG("%s AFGBuildableRailroadSwitchControl is %s at %s", *prefix, *c->GetName(), *c->GetTransform().ToString());
+    FString nestedPrefix = GetNestedPrefix(prefix);
+    AL_LOG("%s mSwitchData.Position: %d", *nestedPrefix, c->mSwitchData.Position);
+    AL_LOG("%s mSwitchData.NumPositions: %d", *nestedPrefix, c->mSwitchData.NumPositions);
+    AL_LOG("%s mVisualState: %d", *nestedPrefix, c->mVisualState);
+    DumpBuildableProperties(GetNestedPrefix(nestedPrefix), c);
+
+    if (shortDump) return;
+
+    DumpRailConnection(FString(nestedPrefix).Append(" mControlledConnection"), c->mControlledConnection, true);
 }
 
 void AutoLinkDebugging::DumpRailSubsystem(FString prefix, const AFGRailroadSubsystem* s)
@@ -1651,6 +1750,37 @@ void AutoLinkDebugging::DumpRailSubsystem(FString prefix, const AFGRailroadSubsy
         auto& trackGraph = kvp.Value;
         DumpRailTrackGraph(GetNestedPrefix(nestedPrefix).Appendf(TEXT(" mTrackGraphs[%d]"), graphID), &trackGraph);
     }
+}
+
+void AutoLinkDebugging::DumpBuildableProperties(FString prefix, const AFGBuildable* o)
+{
+    EnsureColon(prefix);
+    AL_LOG("%s GetBuiltWithRecipe: %s", *prefix, *GetNullOrName(o->GetBuiltWithRecipe()));
+    AL_LOG("%s mBuildEffectInstignator: %s", *prefix, *GetNullOrName(o->mBuildEffectInstignator));
+    AL_LOG("%s mBuildEffectActor: %s", *prefix, *GetNullOrName(o->mBuildEffectActor));
+    AL_LOG("%s mBlueprintBuildEffectIsPlaying: %d", *prefix, o->mBlueprintBuildEffectIsPlaying);
+    AL_LOG("%s mBuildEffectIsPlaying: %d", *prefix, o->mBuildEffectIsPlaying);
+    AL_LOG("%s mParentBuildableActor: %s", *prefix, *GetNullOrName(o->mParentBuildableActor));
+    AL_LOG("%s bForceLegacyBuildEffect: %d", *prefix, o->bForceLegacyBuildEffect);
+    AL_LOG("%s bForceBuildEffectSolo: %d", *prefix, o->bForceBuildEffectSolo);
+    AL_LOG("%s mSkipBuildEffect: %d", *prefix, o->mSkipBuildEffect);
+    AL_LOG("%s mBlueprintBuildEffectID: %d", *prefix, o->mBlueprintBuildEffectID);
+}
+
+void AutoLinkDebugging::DumpMaterialEffect(FString prefix, const UFGMaterialEffect_Build* o)
+{
+    EnsureColon(prefix);
+    if (!o)
+    {
+        AL_LOG("%s UFGMaterialEffect_Build is null", *prefix);
+        return;
+    }
+
+    AL_LOG("%s GetInstigator: %s", *prefix, *GetNullOrName(o->GetInstigator()));
+    AL_LOG("%s GetCost: %s", *prefix, *Join<FItemAmount>(o->GetCost(), [](FItemAmount amt) { return FString::Printf(TEXT("%s:%d"), *amt.ItemClass->GetName(), amt.Amount); }));
+    AL_LOG("%s GetSpeed: %f", *prefix, o->GetSpeed());
+    AL_LOG("%s GetTransform: %s", *prefix, *o->GetTransform().ToString());
+    AL_LOG("%s GetTransform: %d", *prefix, o->IsUsingInstanceData());
 }
 
 void AutoLinkDebugging::RebuildSignalBlocks(AFGRailroadSubsystem* self, int32 graphID)

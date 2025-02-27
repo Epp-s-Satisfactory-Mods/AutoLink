@@ -1,12 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FGBuildable.h"
 #include "FGBuildableConveyorBase.h"
 #include "FGBuildableConveyorLift.h"
 #include "FGBuildEffectActor.h"
 #include "FGBuildableRailroadSignal.h"
 #include "FGFactoryConnectionComponent.h"
 #include "FGFluidIntegrantInterface.h"
+#include "FGMaterialEffect_Build.h"
 #include "FGPipeConnectionComponent.h"
 #include "FGPipeConnectionComponentHyper.h"
 #include "FGPipeNetwork.h"
@@ -37,7 +39,31 @@ public:
     static void DumpRailTrackGraph(FString prefix, const FTrackGraph* g);
     static void DumpRailSignal(FString prefix, const AFGBuildableRailroadSignal* p);
     static void DumpRailSignalBlock(FString prefix, const FFGRailroadSignalBlock* b);
+    static void DumpRailSwitchControl(FString prefix, const AFGBuildableRailroadSwitchControl* c, bool shortDump);
     static void DumpRailSubsystem(FString prefix, const AFGRailroadSubsystem* s);
+    static void DumpBuildableProperties(FString prefix, const AFGBuildable* o);
+    static void DumpMaterialEffect(FString prefix, const UFGMaterialEffect_Build* o);
+
+    template<typename T>
+    static FString Join(TArray<T> array, TFunctionRef<FString(T o)> formatter )
+    {
+        FString result(TEXT("{"));
+        for (int i = 0; i < array.Num(); ++i)
+        {
+            result.Append(formatter(array[i]));
+            if (i < array.Num() - 1)
+            {
+                result.Append(TEXT(","));
+            }
+        }
+        result.Append(TEXT("}"));
+        return result;
+    }
+
+    static FString GetNullOrName(UObject* o)
+    {
+        return o ? o->GetName() : FString(TEXT("null"));
+    }
 
     static FString GetFluidIntegrantName(IFGFluidIntegrantInterface* f)
     {

@@ -21,7 +21,9 @@
 #include "FGBuildablePipelineJunction.h"
 #include "FGBuildablePoleBase.h"
 #include "FGBuildablePowerPole.h"
+#include "FGBuildableRailroadSwitchControl.h"
 #include "FGBuildableRailroadTrack.h"
+#include "FGBuildableSpawnStrategy_RSC.h"
 #include "FGBuildableStorage.h"
 #include "FGBuildableSubsystem.h"
 #include "FGCentralStorageContainer.h"
@@ -36,6 +38,7 @@
 #include "Hologram/FGBuildableHologram.h"
 #include "InstanceData.h"
 #include "Patching/NativeHookManager.h"
+#include "Tests/FGTestBlueprintFunctionLibrary.h"
 
 UAutoLinkRootInstanceModule::UAutoLinkRootInstanceModule()
 {
@@ -71,6 +74,14 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
             return;
         }
     }
+
+    AL_LOG("UAutoLinkRootInstanceModule: Loading blueprint types...");
+
+    this->RailroadSwitchControlBlueprintClass.LoadSynchronous();
+    this->RailroadSwitchControlRecipeBlueprintClass.LoadSynchronous();
+
+    RailRoadSwitchControlClass = this->RailroadSwitchControlBlueprintClass.Get();
+    RailRoadSwitchControlRecipeClass = this->RailroadSwitchControlRecipeBlueprintClass.Get();
 
     AL_LOG("UAutoLinkRootInstanceModule: Hooking Mod Functions...");
 
@@ -930,9 +941,9 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
 
     auto connectorLocation = connectionComponent->GetConnectorLocation();
     // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
-    auto searchStart = connectorLocation + (FVector::UpVector * 10);
+    auto searchStart = connectorLocation;
     // Search a small extra distance from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
-    auto searchRadius = 20.0f;
+    auto searchRadius = 30.0f;
 
     AL_LOG("FindAndLinkCompatibleRailroadConnection: Connector at: %s", *connectorLocation.ToString());
 
@@ -982,17 +993,9 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
             continue;
         }
 
-        auto alreadyConnectedToThis = false;
-        for (auto otherSubConnection : candidateConnection->GetConnections())
-        {
-            if (connectionComponent == otherSubConnection)
-            {
-                alreadyConnectedToThis = true;
-                break;
-            }
-        }
+        // Don't need to explicitly check for the candidate being full because that's done in AddIfCandidate
 
-        if (alreadyConnectedToThis)
+        if (candidateConnection->GetConnections().Contains(connectionComponent))
         {
             AL_LOG("FindAndLinkCompatibleRailroadConnection:\tAlready connected to this candidate!");
             continue;
@@ -1042,16 +1045,25 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
 
         if (numStartingConnections + numCompatibleConnections >= MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
         {
-            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d existing connections and we've found %d to link, which will fill it up. Breaking out of search loop.", numStartingConnections, numCompatibleConnections);
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d existing connections and we've found %d to link, which will fill it up. Breaking out of search loop and linking what we have.", numStartingConnections, numCompatibleConnections);
             break;
         }
 
         // The connection isn't full yet, so keep searching for compatible connections.
     }
 
+    if (numCompatibleConnections == 0)
+    {
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tNo compatible connections found!",
+            numStartingConnections,
+            numCompatibleConnections,
+            MAX_CONNECTIONS_PER_RAIL_CONNECTOR);
+        return;
+    }
+
     if (numStartingConnections + numCompatibleConnections > MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
     {
-        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d connections and we saved %d more to connect, which totals to more than the allowed %d. This really shouldn't happen - there's a bug somewhere! Aborting!",
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d connections and we saved %d more to connect, which sums to more than the allowed %d. This really shouldn't happen - there's a bug somewhere! Aborting!",
             numStartingConnections,
             numCompatibleConnections,
             MAX_CONNECTIONS_PER_RAIL_CONNECTOR);
@@ -1060,27 +1072,56 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
 
     AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound a total of %d compatible connections to attempt to link", numCompatibleConnections);
 
-    if (numCompatibleConnections > 1)
-    {
-        // Linking multiple connections to the same opposing connection creates a switch in the graph so trains
-        // can choose which route to take. If we're here, we're about to create a switch in the graph but if any
-        // of the compatible connections already share a connection, then they already have a switch going in the
-        // opposite direction. The game doesn't allow creating a switch on top of an existing switch (even going
-        // in the other direction) and it's not clear if that could even work, so we don't allow it.
-        TSet<UFGRailroadTrackConnectionComponent*> opposingConnections;
-        for (auto compatibleConnection : compatibleConnections)
-        {
-            for (auto opposingConnection : compatibleConnection->GetConnections())
-            {
-                if (opposingConnections.Contains(opposingConnection))
-                {
-                    AL_LOG("FindAndLinkCompatibleRailroadConnection:\tCompatible connections already share an opposing connection %s on track %s which would create a switch too close to another switch. Aborting linking.",
-                        *opposingConnection->GetName(),
-                        *opposingConnection->GetTrack()->GetName());
-                    return;
-                }
+    // Linking multiple connections to the same opposing connection creates a switch in the graph so trains can choose
+    // which route to take. The game doesn't allow creating a switch at an existing switch (even going in the opposite
+    // direction), so we can't allow it either. Figure out what switches would be generated by autolinking so we can
+    // create the proper switch control or, if necessary, abort linking altogether.
+    // Note that only one switch should ever be created at a time by linking a connection - any more than that means
+    // we are trying to create overlapping switches.
 
-                opposingConnections.Add(opposingConnection);
+    UFGRailroadTrackConnectionComponent* connectionNeedingSwitchControl = nullptr;
+
+    auto willNeedSwitchControlForConnection =
+        // If we're adding 2-3 connections, we had 0 or 1 before (because max 3) and we're creating a new switch
+        numCompatibleConnections > 1 ||
+        // If we had 1 connection and we're adding any, then we're making a new switch
+        (numStartingConnections == 1 && numCompatibleConnections > 0);
+    if (willNeedSwitchControlForConnection)
+    {
+        connectionNeedingSwitchControl = connectionComponent;
+    }
+
+    // We know whether we are creating a switch for the scanning connection. Now we have to figure out if it would create
+    // a new switch for any of the compatible connections.
+
+    bool foundExistingSwitch = numStartingConnections > 1; // True if the scanning connection already has a switch
+    for (auto compatibleConnection : compatibleConnections)
+    {
+        int numConnections = compatibleConnection->GetConnections().Num();
+
+        // If it already has connections before linking, it has or will create a switch
+        if (numConnections > 0)
+        {
+            // If it has or creates a switch and one of the other connection has or creates a switch, we're creating overlapping switches
+            if (foundExistingSwitch || connectionNeedingSwitchControl)
+            {
+                AL_LOG("FindAndLinkCompatibleRailroadConnection:\tCompatible connection %s on %s either has or needs a switch but connection %s on %s will need one to complete linking. This is trying to create overlapping switches, so we abort all linking!",
+                    *compatibleConnection->GetName(),
+                    *compatibleConnection->GetTrack()->GetName(),
+                    *connectionNeedingSwitchControl->GetName(),
+                    *connectionNeedingSwitchControl->GetTrack()->GetName());
+                return;
+            }
+
+            if (numConnections > 1)
+            {
+                // If there are multiple connections on this, it already has a switch
+                foundExistingSwitch = true;
+            }
+            else
+            {
+                // If there was just one, then it's making a switch and will need a switch control
+                connectionNeedingSwitchControl = compatibleConnection;
             }
         }
     }
@@ -1099,30 +1140,44 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
     // any candidates. To ensure the overlapping tracks are correct on the compatible connection tracks, we just explicitly update their
     // overlapping tracks after the connection is made.
 
-    if (numCompatibleConnections > 0)
+    auto connectionTrack = connectionComponent->GetTrack();
+
+    auto railSubsystem = AFGRailroadSubsystem::Get(connectionComponent->GetWorld());
+    railSubsystem->RemoveTrack(connectionTrack);
+
+    for (auto compatibleConnection : compatibleConnections)
     {
-        auto connectionTrack = connectionComponent->GetTrack();
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tLinking to connection %s on %s", *compatibleConnection->GetName(), *compatibleConnection->GetTrack()->GetName());
+        connectionComponent->AddConnection(compatibleConnection);
+    }
 
-        auto subsystem = AFGRailroadSubsystem::Get(connectionComponent->GetWorld());
-        subsystem->RemoveTrack(connectionTrack);
+    railSubsystem->AddTrack(connectionTrack);
 
-        for (auto compatibleConnection : compatibleConnections)
+    for (auto compatibleConnection : compatibleConnections)
+    {
+        auto linkedTrack = compatibleConnection->GetTrack();
+        if (linkedTrack->mOverlappingTracks.Contains(connectionTrack))
         {
-            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tLinking to connection %s on %s", *compatibleConnection->GetName(), *compatibleConnection->GetTrack()->GetName());
-            connectionComponent->AddConnection(compatibleConnection);
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tTrack %s still thinks it's overlapping the base track. Updating it.", *linkedTrack->GetName());
+            linkedTrack->UpdateOverlappingTracks();
         }
+    }
 
-        subsystem->AddTrack(connectionTrack);
+    // Now that tracks are connected and updated, we can create a switch control if any connection needs it
+    if (connectionNeedingSwitchControl)
+    {
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tCreating a switch control for connection %s on %s", *connectionNeedingSwitchControl->GetName(), *connectionNeedingSwitchControl->GetTrack()->GetName());
 
-        for (auto compatibleConnection : compatibleConnections)
-        {
-            auto linkedTrack = compatibleConnection->GetTrack();
-            if (linkedTrack->mOverlappingTracks.Contains(connectionTrack))
-            {
-                AL_LOG("FindAndLinkCompatibleRailroadConnection:\tTrack %s still thinks it's overlapping the base track. Updating it.", *linkedTrack->GetName());
-                linkedTrack->UpdateOverlappingTracks();
-            }
-        }
+        auto strat = NewObject<UFGBuildableSpawnStrategy_RSC>();
+        strat->mPlayBuildEffect = true;
+        strat->mBuiltWithRecipe = RailRoadSwitchControlRecipeClass;
+        strat->mControlledConnection = connectionNeedingSwitchControl;
+
+        auto switchControl = Cast<AFGBuildableRailroadSwitchControl>(UFGTestBlueprintFunctionLibrary::SpawnBuildableFromClass(
+            RailRoadSwitchControlClass,
+            connectionNeedingSwitchControl->GetComponentTransform(),
+            connectionNeedingSwitchControl->GetWorld(),
+            strat));
     }
 }
 
