@@ -279,7 +279,8 @@ void UAutoLinkRootInstanceModule::FindAndLinkForBuildable(AFGBuildable* buildabl
             }
         }
 
-        if (integrantsToRegister.Num() > 0)
+        // Don't register fluid integrants if we're inside a blueprint designer
+        if ( !buildable->GetBlueprintDesigner() && integrantsToRegister.Num() > 0)
         {
             AL_LOG("FindAndLinkForBuildable: Found connections have a total of %d integrants to register", integrantsToRegister.Num());
             auto pipeSubsystem = AFGPipeSubsystem::GetPipeSubsystem(buildable->GetWorld());

@@ -12,6 +12,7 @@
 #include "FGPipeConnectionComponent.h"
 #include "FGPipeConnectionComponentHyper.h"
 #include "FGPipeNetwork.h"
+#include "FGPipeSubsystem.h"
 #include "FGRailroadTrackConnectionComponent.h"
 
 class AUTOLINK_API AutoLinkDebugging
@@ -32,6 +33,7 @@ public:
     static void DumpConnection(FString prefix, UFGPipeConnectionComponentHyper* c);
     static void DumpBuildEffectActor(FString prefix, const AFGBuildEffectActor* b);
     static void DumpPipeNetwork(FString prefix, const AFGPipeNetwork* p);
+    static void DumpPipeSubystem(FString prefix, const AFGPipeSubsystem* o);
 
     static void DumpRailConnection(FString prefix, const UFGRailroadTrackConnectionComponent* c, bool shortDump);
     static void DumpRailTrackPosition(FString prefix, const FRailroadTrackPosition* p);

@@ -108,6 +108,11 @@ void AutoLinkDebugging::RegisterDebugHooks()
                 }
             }
 
+            if (AL_REGISTER_PIPE_TRACE_HOOKS)
+            {
+                DumpPipeSubystem(TEXT("UFGBuildGunState::OnRecipeSampled"), AFGPipeSubsystem::Get(self->GetWorld()));
+            }
+
             AL_LOG("UFGBuildGunState::OnRecipeSampled. Actor %s (%s) at %x dumped.", *actor->GetName(), *actor->GetClass()->GetName(), actor);
 
             scope(self, recipe);
@@ -1551,6 +1556,26 @@ void AutoLinkDebugging::DumpPipeNetwork(FString prefix, const AFGPipeNetwork* p)
     for (auto in : p->mFluidIntegrants)
     {
         AL_LOG("%s mFluidIntegrants[%d]: %s", *GetNestedPrefix(nestedPrefix), i++, *GetFluidIntegrantName(in));
+    }
+}
+
+void AutoLinkDebugging::DumpPipeSubystem(FString prefix, const AFGPipeSubsystem* o)
+{
+    EnsureColon(prefix);
+    if (!o)
+    {
+        AL_LOG("%s AFGPipeSubsystem is null", *prefix);
+        return;
+    }
+
+    AL_LOG("%s AFGPipeSubsystem is %s", *prefix, *o->GetName());
+    auto nestedPrefix = GetNestedPrefix(prefix);
+    AL_LOG("%s mIDCounter: %d", *nestedPrefix, o->mIDCounter);
+    AL_LOG("%s mNetworks: %d items", *nestedPrefix, o->mNetworks.Num());
+
+    for (auto& kvp : o->mNetworks)
+    {
+        DumpPipeNetwork(FString(nestedPrefix).Appendf(TEXT(" mNetworks[%d]"), kvp.Key), kvp.Value);
     }
 }
 
