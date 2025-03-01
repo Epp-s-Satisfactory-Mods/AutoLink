@@ -10,6 +10,7 @@
 #include "AbstractInstanceManager.h"
 #include "BlueprintHookManager.h"
 #include "FGBlueprintHologram.h"
+#include "FGBuildableConveyorAttachment.h"
 #include "FGBuildableConveyorBase.h"
 #include "FGBuildableConveyorBelt.h"
 #include "FGBuildableConveyorLift.h"
@@ -775,13 +776,20 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         {
             AL_LOG("FindAndLinkCompatibleBeltConnection:\tAt least one conveyor lift is involved.");
 
-            minConnectorOffset = 100.0; // Prevent the lift(s) from clipping in ways the game doesn't normally allow
+            if (candidateOuterBuildable->IsA(AFGBuildableConveyorAttachment::StaticClass()) || candidateOuterBuildable->IsA(AFGBuildableConveyorAttachment::StaticClass()))
+            {
+                minConnectorOffset = 0; // Lifts are allowed to clip all the way into splitters/mergers
+            }
+            else
+            {
+                minConnectorOffset = 100.0; // But they cannot clip all the way into other factory buildings
+            }
 
             // Two conveyor lifts can directly connect 400 units away. There are ways to make it look like two
-            // fully-extended lifts are attached at 300 units each but the game will shrink the bellows to 200
-            // units each on reload, even if we AutoLink them - the bellows only seem to extend into buildings.
-            // If it's just one conveyor lift, then we're either scanning to/from a building and those connectors
-            // can be at-most 300 units away as the bellows will fully extend for them.
+            // fully-extended lifts are attached at 300 units each (600 total) but the game will shrink the
+            // bellows to 200 units each on reload, even if we AutoLink them - the bellows only seem to extend
+            // into buildings. If it's just one conveyor lift, then we're either scanning to/from a building and
+            // those connectors can be at-most 300 units away as the bellows will fully extend for them.
             maxConnectorOffset = connectionConveyorLift && candidateConveyorLift ? 400.0 : 300.0;
         }
 
@@ -817,7 +825,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
             }
         }
 
-        AL_LOG("FindAndLinkCompatibleBeltConnection:\tFinal values. Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
+        AL_LOG("FindAndLinkCompatibleBeltConnection:\tFinal offsets . Min offset: %f. Max offset: %f", minConnectorOffset, maxConnectorOffset);
 
         if (minConnectorOffset > maxConnectorOffset)
         {
@@ -826,7 +834,10 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
         }
 
         const FVector candidateConnectorLocation = candidateConnection->GetConnectorLocation();
-        FVector fromCandidateToConnectorVector = connectorLocation - candidateConnectorLocation; // This gives the vector from the candidate connection to the main connector
+        // This gives the vector from the candidate connection to the main connector, which is useful to know where the connectors are in space relative to each other.
+        // With simple vector operations on just the connector normals, they could theoretically point "against" each other but be on opposite sides of the map. Using
+        // the vector between the connector and the candidate lets us determine their distance and whether the connectors are overlapping.
+        FVector fromCandidateToConnectorVector = connectorLocation - candidateConnectorLocation; 
 
         AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnector Location %s, Candidate Location: %s, Candidate to Connector Vector: %s",
             *connectorLocation.ToString(),
@@ -841,9 +852,8 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
             *candidateConnectorNormal.ToString());
 
         double fromCandidateToConnectorDistance;
-
-        const float CompareTolerance = .1;
-        if (fromCandidateToConnectorVector.IsNearlyZero(CompareTolerance))
+        const double FloatingPointPrecisionTolerance = .1;
+        if (fromCandidateToConnectorVector.IsNearlyZero(FloatingPointPrecisionTolerance)) // Treat connections within tolerance as touching
         {
             if (minConnectorOffset > 0 || maxConnectorOffset < 0)
             {
@@ -851,8 +861,10 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
                 continue;
             }
 
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tUnitVectorsArePointingInOppositeDirections: %d", UnitVectorsArePointingInOppositeDirections(connectorNormal, candidateConnectorNormal, .015));
+
             // If the connectors are touching and 0 is an allowed distance, then check whether they are facing each other.
-            if (!FVector::PointsAreNear(connectorNormal, -candidateConnectorNormal, CompareTolerance))
+            if (!FVector::PointsAreNear(connectorNormal, -candidateConnectorNormal, FloatingPointPrecisionTolerance))
             {
                 AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are touching but not pointed in opposite directions!");
                 continue;
@@ -860,8 +872,14 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
 
             fromCandidateToConnectorDistance = 0;
         }
+        else if (minConnectorOffset == 0 && maxConnectorOffset == 0)
+        {
+            AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are not touching but min and max offset are both 0!");
+            continue;
+        }
         else
         {
+            // Connectors are some distance from each other and min/max offsets allow some distance - now we figure out if they match
             FVector fromCandidateToConnectorNormal;
             fromCandidateToConnectorVector.ToDirectionAndLength(fromCandidateToConnectorNormal, fromCandidateToConnectorDistance);
 
@@ -869,38 +887,50 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
                 fromCandidateToConnectorDistance,
                 *fromCandidateToConnectorNormal.ToString());
 
-            auto areAlignedInOppositeDirections =
-                (FVector::PointsAreNear(candidateConnectorNormal, fromCandidateToConnectorNormal, CompareTolerance) &&
-                 FVector::PointsAreNear(connectorNormal, -fromCandidateToConnectorNormal, CompareTolerance))
-                ||
-                (FVector::PointsAreNear(candidateConnectorNormal, -fromCandidateToConnectorNormal, CompareTolerance) &&
-                 FVector::PointsAreNear(connectorNormal, fromCandidateToConnectorNormal, CompareTolerance));
+            const int ConnectorOffsetPadding = 1; // Padding to allow for floating point issues and ever-so-slightly angled connectors
+            const double CosineTolerance = .001; // Equates to 2.563 degrees of tolerance, which is around the limit of the angle at which conveyor lifts will naturally snap to connections, from in-game testing
 
-            if (!areAlignedInOppositeDirections)
+            if (UnitVectorsArePointingInOppositeDirections(connectorNormal, fromCandidateToConnectorNormal, CosineTolerance) // Connector normal points at candidate
+                &&
+                UnitVectorsArePointingInOppositeDirections(candidateConnectorNormal, -fromCandidateToConnectorNormal, CosineTolerance)) // Candidate normal points at connector
             {
-                AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are not aligned and/or are not pointed in opposite directions!");
+                // They are aligned, pointing at each other, and the candidate is at a positive offset, so check against allowed positive offsets
+
+                if (maxConnectorOffset <= 0 || fromCandidateToConnectorDistance > maxConnectorOffset + ConnectorOffsetPadding)
+                {
+                    AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate offset (%f) is outside of the max connector offset (%f)!", fromCandidateToConnectorDistance, maxConnectorOffset);
+                    continue;
+                }
+                else if (minConnectorOffset >= 0 && fromCandidateToConnectorDistance < minConnectorOffset - ConnectorOffsetPadding)
+                {
+                    AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate offset (%f) is outside of the min connector offset (%f)!", fromCandidateToConnectorDistance, minConnectorOffset);
+                    continue;
+                }
+            }
+            else if (
+                UnitVectorsArePointingInOppositeDirections(connectorNormal, -fromCandidateToConnectorNormal, CosineTolerance) // Connector normal points away from candidate
+                &&
+                UnitVectorsArePointingInOppositeDirections(candidateConnectorNormal, fromCandidateToConnectorNormal, CosineTolerance)) // Candidate normal points away from connector
+            {
+                auto negativeCandidateDistance = -fromCandidateToConnectorDistance;
+
+                // They are aligned, pointing away from each other, and the candidate is at a negative offset, so check against allowed negative offsets
+                if (minConnectorOffset >= 0 || negativeCandidateDistance < minConnectorOffset - ConnectorOffsetPadding)
+                {
+                    AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate offset (%f) is outside of the min connector offset (%f)!", negativeCandidateDistance, minConnectorOffset);
+                    continue;
+                }
+                else if (maxConnectorOffset <= 0 && negativeCandidateDistance > maxConnectorOffset + ConnectorOffsetPadding)
+                {
+                    AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate offset (%f) is outside of the max connector offset (%f)!", negativeCandidateDistance, maxConnectorOffset);
+                    continue;
+                }
+            }
+            else
+            {
+                AL_LOG("FindAndLinkCompatibleBeltConnection:\tThe connectors are not collinear!");
                 continue;
             }
-
-            // Pad a bit to compensate for floating point precision
-            auto minOffsetPoint = connectorLocation + (minConnectorOffset * connectorNormal);
-            auto maxOffsetPoint = connectorLocation + (maxConnectorOffset * connectorNormal);
-            AL_LOG("FindAndLinkCompatibleBeltConnection:\tMin offset point: %s, Max offset point: %s", *minOffsetPoint.ToString(), *maxOffsetPoint.ToString());
-
-#define IS_IN_RANGE( VALUE, MIN, MAX, TOLERANCE ) (VALUE >= (MIN - TOLERANCE) && VALUE <= (MAX + TOLERANCE))
-#define IS_BETWEEN( VALUE, FIRST, SECOND, TOLERANCE) \
-        ((FIRST <= SECOND) ? IS_IN_RANGE(VALUE, FIRST, SECOND, TOLERANCE) : IS_IN_RANGE(VALUE, SECOND, FIRST, TOLERANCE))
-
-            if (!IS_BETWEEN(candidateConnectorLocation.X, minOffsetPoint.X, maxOffsetPoint.X, CompareTolerance) ||
-                !IS_BETWEEN(candidateConnectorLocation.Y, minOffsetPoint.Y, maxOffsetPoint.Y, CompareTolerance) ||
-                !IS_BETWEEN(candidateConnectorLocation.Z, minOffsetPoint.Z, maxOffsetPoint.Z, CompareTolerance))
-            {
-                AL_LOG("FindAndLinkCompatibleBeltConnection:\tCandidate is not an allowed distance from the connector! Candidate location: %s", *candidateConnectorLocation.ToString());
-                continue;
-            }
-
-#undef IS_IN_RANGE
-#undef IS_BETWEEN
         }
 
         if (fromCandidateToConnectorDistance < closestDistance)
@@ -1031,7 +1061,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
 
         // Determine if the connections components are aligned
         const FVector crossProduct = FVector::CrossProduct(connectorNormal, candidateConnectorNormal);
-        // We allow slightly unaligned normal vetors to account for curved rails.
+        // We allow slightly unaligned normal vectors to account for curved rails.
         auto isCollinear = FMath::IsNearlyZero(crossProduct.X, .01) && FMath::IsNearlyZero(crossProduct.Y, .01) && FMath::IsNearlyZero(crossProduct.Z, 1.0);
         if (!isCollinear)
         {
@@ -1346,4 +1376,16 @@ bool UAutoLinkRootInstanceModule::ConnectBestPipeCandidate(UFGPipeConnectionComp
 
     AL_LOG("ConnectBestPipeCandidate: No compatible connection found");
     return false;
+}
+
+bool UAutoLinkRootInstanceModule::UnitVectorsArePointingInOppositeDirections(FVector firstUnitVector, FVector secondUnitVector, double cosineTolerance)
+{
+    auto dotProduct = firstUnitVector.Dot(secondUnitVector);
+
+    // Because they are unit vectors, the dot product is exactly the cosine of the angle between the vectors. For them to be in opposite directions,
+    // that should be -1, but we have a tolerance for floating point error and to allow slight angles when needed
+
+    auto result = dotProduct <= (cosineTolerance - 1);
+    AL_LOG("UnitVectorsArePointingInOppositeDirections: Dot product of %s and %s is %f. Cosine tolerance is %f. Angle between them is: %f. Result: %d", *firstUnitVector.ToString(), *secondUnitVector.ToString(), dotProduct, cosineTolerance, FMath::RadiansToDegrees(acos(dotProduct)), result);
+    return result;
 }

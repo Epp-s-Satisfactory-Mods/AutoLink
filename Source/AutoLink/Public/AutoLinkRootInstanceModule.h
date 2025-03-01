@@ -91,4 +91,6 @@ public:
     static bool FindAndLinkCompatibleFluidConnection(UFGPipeConnectionComponent* connectionComponent, const TArray<UClass*>& incompatibleClasses);
     static bool FindAndLinkCompatibleHyperConnection(UFGPipeConnectionComponentHyper* connectionComponent);
     static bool ConnectBestPipeCandidate(UFGPipeConnectionComponentBase* connectionComponent, TArray<UFGPipeConnectionComponentBase*>& candidates);
+
+    static bool UnitVectorsArePointingInOppositeDirections(FVector firstUnitVector, FVector secondUnitVector, double cosineTolerance);
 };
