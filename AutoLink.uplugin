@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 0,
-	"VersionName": "0.8.1",
+	"VersionName": "0.9.0",
 	"FriendlyName": "AutoLink",
 	"Description": "Blueprints can tile and structures automatically hook up to all incoming/outgoing connections.",
 	"Category": "Modding",
@@ -33,6 +33,6 @@
 			"BasePlugin": true
 		}
 	],
-	"SemVersion": "0.8.1",
+	"SemVersion": "0.9.0",
 	"GameVersion": ">=383729"
 }
