@@ -985,7 +985,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
     // Search a small extra distance from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
     auto searchRadius = 30.0f;
 
-    AL_LOG("FindAndLinkCompatibleRailroadConnection: Connector at: %s", *connectorLocation.ToString());
+    AL_LOG("FindAndLinkCompatibleRailroadConnection: Connector at: %s. Currently has %d connections. Already has a switch control: %d", *connectorLocation.ToString(), numStartingConnections, connectionComponent->GetSwitchControl() != nullptr);
 
     // Curved rails don't always seem to be hit by linear hitscan out of the connector normal so we do a radius search here to be sure we're getting good candidates.
     auto connectionOwner = connectionComponent->GetOwner();
@@ -1006,6 +1006,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
             TInlineComponentArray<UFGRailroadTrackConnectionComponent*> openConnections;
             FindOpenRailroadConnections(openConnections, buildable);
 
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound %d open railroad connections on hit result actor", openConnections.Num());
             for (auto openConnection : openConnections)
             {
                 candidates.Add(openConnection);
@@ -1122,22 +1123,37 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
     UFGRailroadTrackConnectionComponent* connectionNeedingSwitchControl = nullptr;
 
     auto willNeedSwitchControlForConnection =
-        // If we're adding 2-3 connections, we had 0 or 1 before (because max 3) and we're creating a new switch
-        numCompatibleConnections > 1 ||
-        // If we had 1 connection and we're adding any, then we're making a new switch
-        (numStartingConnections == 1 && numCompatibleConnections > 0);
+        // Switch controls shouldn't exist on a connection unless it already has more than 1 connection but I received
+        // a crash report where a modded blueprint had a connector with 1 connection AND a switch control, so we'll
+        // be extra sure not to exacerbate invalid states by assuming anything with a switch control counts as a switch.
+        !connectionComponent->GetSwitchControl()
+        &&
+        (
+            // If we're adding 2-3 connections, we had 0 or 1 before (because the max is 3) and we're creating a new switch
+            numCompatibleConnections > 1 ||
+            // If we had 1 connection and we're adding any, then we're making a new switch
+            (numStartingConnections == 1 && numCompatibleConnections > 0)
+        );
     if (willNeedSwitchControlForConnection)
     {
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tLinking will result in a switch control created for this connection");
         connectionNeedingSwitchControl = connectionComponent;
+    }
+    else
+    {
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tLinking will NOT result in a switch control created for this connection");
     }
 
     // We know whether we are creating a switch for the scanning connection. Now we have to figure out if it would create
     // a new switch for any of the compatible connections.
 
-    bool foundExistingSwitch = numStartingConnections > 1; // True if the scanning connection already has a switch
+    // True if the scanning connection already has a switch
+    bool foundExistingSwitch = numStartingConnections > 1 || connectionComponent->GetSwitchControl();
     for (auto compatibleConnection : compatibleConnections)
     {
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tChecking whether compatible connection %s on %s already has a switch control", *compatibleConnection->GetName(), *compatibleConnection->GetTrack()->GetName());
         int numConnections = compatibleConnection->GetConnections().Num();
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\t\tIt has %d connections already", numConnections);
 
         // If it already has connections before linking, it has or will create a switch
         if (numConnections > 0)
@@ -1153,14 +1169,16 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
                 return;
             }
 
-            if (numConnections > 1)
+            if (numConnections > 1 || compatibleConnection->GetSwitchControl())
             {
-                // If there are multiple connections on this, it already has a switch
+                // If there are multiple connections or a switch control already on this, then we have an existing switch
+                AL_LOG("FindAndLinkCompatibleRailroadConnection:\t\tCompatible connection already has a switch or switch control - we shouldn't need to create one");
                 foundExistingSwitch = true;
             }
             else
             {
-                // If there was just one, then it's making a switch and will need a switch control
+                // If there was just one connection and no switch control, then linking will make a new switch and this will need a switch control
+                AL_LOG("FindAndLinkCompatibleRailroadConnection:\t\tCompatible connection will need a switch after linking");
                 connectionNeedingSwitchControl = compatibleConnection;
             }
         }
