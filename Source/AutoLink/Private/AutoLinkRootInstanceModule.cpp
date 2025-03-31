@@ -852,8 +852,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
             *candidateConnectorNormal.ToString());
 
         double fromCandidateToConnectorDistance;
-        const double FloatingPointPrecisionTolerance = .1;
-        if (fromCandidateToConnectorVector.IsNearlyZero(FloatingPointPrecisionTolerance)) // Treat connections within tolerance as touching
+        if (fromCandidateToConnectorVector.IsNearlyZero(1)) // Treat a distance within 1 cm as touching
         {
             if (minConnectorOffset > 0 || maxConnectorOffset < 0)
             {
@@ -864,7 +863,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
             AL_LOG("FindAndLinkCompatibleBeltConnection:\tUnitVectorsArePointingInOppositeDirections: %d", UnitVectorsArePointingInOppositeDirections(connectorNormal, candidateConnectorNormal, .015));
 
             // If the connectors are touching and 0 is an allowed distance, then check whether they are facing each other.
-            if (!FVector::PointsAreNear(connectorNormal, -candidateConnectorNormal, FloatingPointPrecisionTolerance))
+            if (!FVector::PointsAreNear(connectorNormal, -candidateConnectorNormal, .1)) // Allow a little floating point precision error
             {
                 AL_LOG("FindAndLinkCompatibleBeltConnection:\tConnectors are touching but not pointed in opposite directions!");
                 continue;
