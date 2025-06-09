@@ -28,7 +28,7 @@ void UFGBuildableSpawnStrategy_RSC::PreSpawnBuildable(AFGBuildable* buildable)
 
     //switchControl->bForceLegacyBuildEffect = true;
     switchControl->SetBuiltWithRecipe(this->mControlledConnection->GetTrack()->GetBuiltWithRecipe());
-    switchControl->SetControlledConnection(this->mControlledConnection);
+    switchControl->AddControlledConnection(this->mControlledConnection);
     this->mControlledConnection->SetSwitchControl(switchControl);
 
     UFGBuildableSpawnStrategy::PreSpawnBuildable(buildable);

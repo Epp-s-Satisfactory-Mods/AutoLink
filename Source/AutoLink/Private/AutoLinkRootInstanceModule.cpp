@@ -2,10 +2,8 @@
 
 #include "AutoLinkDebugging.h"
 #include "AutoLinkDebugSettings.h"
-#include "AutoLinkLinuxHooking.h"
 #include "AutoLinkLogCategory.h"
 #include "AutoLinkLogMacros.h"
-#include "AutoLinkWindowsHooking.h"
 
 #include "AbstractInstanceManager.h"
 #include "BlueprintHookManager.h"
@@ -162,12 +160,6 @@ void UAutoLinkRootInstanceModule::DispatchLifecycleEvent(ELifecyclePhase phase)
         });
 
 #undef SUBSCRIBE_CONFIGURE_COMPONENTS
-
-#if PLATFORM_WINDOWS
-    AutoLinkWindowsHooking::RegisterWindowsOnlyHooks();
-#elif PLATFORM_LINUX
-    AutoLinkLinuxHooking::RegisterLinuxOnlyHooks();
-#endif
 
     Super::DispatchLifecycleEvent(phase);
 }

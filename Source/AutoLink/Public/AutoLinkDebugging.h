@@ -20,8 +20,6 @@ class AUTOLINK_API AutoLinkDebugging
 public:
     static void RegisterDebugHooks();
     static void RegisterGeneralDebugTraceHooks();
-    static void RegisterDebugTraceForDisabledModFunctions();
-    static void RegisterBuildEffectTraceHooks();
     static void RegisterRailTraceHooks();
     static void RegisterPipeTraceHooks();
 

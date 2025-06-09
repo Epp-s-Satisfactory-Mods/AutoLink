@@ -118,19 +118,9 @@ void AutoLinkDebugging::RegisterDebugHooks()
             scope(self, recipe);
         });
 
-    if (!AL_DEBUG_ENABLE_MOD)
-    {
-        RegisterDebugTraceForDisabledModFunctions();
-    }
-
     if (AL_REGISTER_GENERAL_DEBUG_TRACE_HOOKS)
     {
         RegisterGeneralDebugTraceHooks();
-    }
-
-    if (AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS)
-    {
-        RegisterBuildEffectTraceHooks();
     }
 
     if (AL_REGISTER_RAIL_TRACE_HOOKS)
@@ -303,288 +293,6 @@ void AutoLinkDebugging::RegisterGeneralDebugTraceHooks()
         });
 }
 
-void AutoLinkDebugging::RegisterDebugTraceForDisabledModFunctions()
-{
-    if (AL_DEBUG_ENABLE_MOD) return;
-
-    if (!AL_REGISTER_BUILD_EFFECT_TRACE_HOOKS) return; // At the moment, they are all build effect trace hooks
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetBeltSourceSplinesOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildableConveyorBelt*>& inBelts, TArray<AActor*>& orderedActors) {
-        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        int i = 0;
-        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE: inBelts: %d", inBelts.Num());
-        for (auto belt : inBelts)
-        {
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered BEFORE:\t inBelts[%d]: %s", i++, *belt->GetName());
-        }
-        auto splines = scope(self, inBelts, orderedActors);
-        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
-        i = 0;
-        for (auto actor : orderedActors)
-        {
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
-        }
-        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER: Total Splines: %d", splines.Num());
-        i = 0;
-        for (USplineComponent* spline : splines)
-        {
-            AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
-        }
-        AL_LOG("AFGBuildEffectActor::GetBeltSourceSplinesOrdered END");
-        return splines;
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetPipeSourceSplineOrdered, [](auto& scope, const AFGBuildEffectActor* self, const TArray<class AFGBuildablePipeBase*>& inPipes, TArray<AActor*>& orderedActors) {
-        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        int i = 0;
-        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE: inPipes: %d", inPipes.Num());
-        for (auto pipe : inPipes)
-        {
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered BEFORE:\t inPipes[%d]: %s", i++, *pipe->GetName());
-        }
-        auto splines = scope(self, inPipes, orderedActors);
-        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: orderedActors: %d", orderedActors.Num());
-        i = 0;
-        for (auto actor : orderedActors)
-        {
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t orderedActors[%d]: %s", i++, *actor->GetName());
-        }
-        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER: Total Splines: %d", splines.Num());
-        i = 0;
-        for (USplineComponent* spline : splines)
-        {
-            AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered AFTER FILTER:\t splines[%d]: %s (%s). Owner: %s", i++, *spline->GetName(), *spline->GetClass()->GetName(), *spline->GetOwner()->GetName());
-        }
-        AL_LOG("AFGBuildEffectActor::GetPipeSourceSplineOrdered END");
-        return splines;
-        });
-}
-
-void AutoLinkDebugging::RegisterBuildEffectTraceHooks()
-{
-    /* AFGBuildable */
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, PlayBuildEffects, [](auto& scope, AFGBuildable* self, AActor* inInstigator) {
-        AL_LOG("AFGBuildable::PlayBuildEffects START %s (%s). inInstigator: %s (%s)", *self->GetName(), *self->GetClass()->GetName(), *inInstigator->GetName(), *inInstigator->GetClass()->GetName());
-        scope(self, inInstigator);
-        AL_LOG("AFGBuildable::PlayBuildEffects END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, GetBuildEffectTemplate_Implementation, [](auto& scope, const AFGBuildable* self) {
-        AL_LOG("AFGBuildable::GetBuildEffectTemplate_Implementation START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        TSoftClassPtr<UFGMaterialEffect_Build> result = scope(self);
-        auto materialEffect = Cast<UFGMaterialEffect_Build>(result.LoadSynchronous());
-        DumpMaterialEffect("AFGBuildable::GetBuildEffectTemplate_Implementation END", materialEffect);
-        return result;
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, ExecutePlayBuildEffects, [](auto& scope, AFGBuildable* self) {
-        AL_LOG("AFGBuildable::ExecutePlayBuildEffects START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildable::ExecutePlayBuildEffects END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, OnBuildEffectFinished, [](auto& scope, AFGBuildable* self) {
-        AL_LOG("AFGBuildable::OnBuildEffectFinished START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildable::OnBuildEffectFinished END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, PlayBuildEffectActor, [](auto& scope, AFGBuildable* self, AActor* inInstigator) {
-        AL_LOG("AFGBuildable::PlayBuildEffectActor START %s (%s). Instigator: %s (%s)", *self->GetName(), *self->GetClass()->GetName(), *inInstigator->GetName(), *inInstigator->GetClass()->GetName());
-        scope(self, inInstigator);
-        AL_LOG("AFGBuildable::PlayBuildEffectActor END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, ExecutePlayBuildActorEffects, [](auto& scope, AFGBuildable* self) {
-        AL_LOG("AFGBuildable::ExecutePlayBuildActorEffects START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildable::ExecutePlayBuildActorEffects END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, OnBuildEffectActorFinished, [](auto& scope, AFGBuildable* self) {
-        AL_LOG("AFGBuildable::OnBuildEffectActorFinished START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("AFGBuildable::OnBuildEffectActorFinished END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, HandleBlueprintSpawnedBuildEffect, [](auto& scope, AFGBuildable* self, AFGBuildEffectActor* inBuildEffectActor) {
-        AL_LOG("AFGBuildable::HandleBlueprintSpawnedBuildEffect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, inBuildEffectActor);
-        AL_LOG("AFGBuildable::HandleBlueprintSpawnedBuildEffect END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, SetIsPlayingBuildEffect, [](auto& scope, AFGBuildable* self, bool isPlaying) {
-        AL_LOG("AFGBuildable::SetIsPlayingBuildEffect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, isPlaying);
-        AL_LOG("AFGBuildable::SetIsPlayingBuildEffect END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, SetIsPlayingBlueprintBuildEffect, [](auto& scope, AFGBuildable* self, bool isPlaying) {
-        AL_LOG("AFGBuildable::SetIsPlayingBlueprintBuildEffect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, isPlaying);
-        AL_LOG("AFGBuildable::SetIsPlayingBlueprintBuildEffect END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, SetBuildEffectActor, [](auto& scope, AFGBuildable* self, AFGBuildEffectActor* BuildEffectActor) {
-        AL_LOG("AFGBuildable::SetBuildEffectActor START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, BuildEffectActor);
-        AL_LOG("AFGBuildable::SetBuildEffectActor END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildable, ShouldSkipBuildEffect, [](auto& scope, AFGBuildable* self) {
-        AL_LOG("AFGBuildable::ShouldSkipBuildEffect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        auto result = scope(self);
-        AL_LOG("AFGBuildable::ShouldSkipBuildEffect END %d", result);
-        return result;
-        });
-
-    /* AFGBuildableHologram */
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableHologram, ConfigureBuildEffect,
-        [](auto& scope, AFGBuildableHologram* self, AFGBuildable* buildable)
-        {
-            AL_LOG("AFGBuildableHologram::ConfigureBuildEffect START %s (%s). Buildable: %s", *self->GetName(), *self->GetClass()->GetName(), *buildable->GetName());
-            scope(self, buildable);
-            AL_LOG("AFGBuildableHologram::ConfigureBuildEffect END");
-        });
-
-    /* AFGBuildableSubsystem */
-
-    SUBSCRIBE_METHOD_AFTER(AFGBuildableSubsystem::RequestBuildEffectActor, [](UObject* WorldContext, AFGBuildEffectActor*& BuildEffectActor, TSubclassOf< AFGBuildEffectActor > TemplateClass, FTransform Transform, AActor* instigator, bool bForceSolo) {
-        AL_LOG("AFGBuildableSubsystem::RequestBuildEffectActor AFTER START bForceSolo: %d", bForceSolo);
-        if (TemplateClass)
-        {
-            AL_LOG("AFGBuildableSubsystem::RequestBuildEffectActor AFTER START TemplateClass: %s", *TemplateClass->GetName());
-        }
-        if (instigator)
-        {
-            AL_LOG("AFGBuildableSubsystem::RequestBuildEffectActor AFTER START instigator: %s (%s)", *instigator->GetName(), *instigator->GetClass()->GetName());
-        }
-        DumpBuildEffectActor("AFGBuildableSubsystem::RequestBuildEffectActor RESULT", BuildEffectActor);
-        AL_LOG("AFGBuildableSubsystem::RequestBuildEffectActor AFTER END");
-        });
-
-    /* AFGBuildEffectActor */
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, AddAbstractDataEntry, [](auto& scope, AFGBuildEffectActor* self, TSubclassOf< AFGBuildable > buildableClass, const FRuntimeBuildableInstanceData& runtimeData, UAbstractInstanceDataObject* InstanceData, int32 Index) {
-        AL_LOG("AFGBuildEffectActor::AddAbstractDataEntry START %s (%s). buildableClass: %s", *self->GetName(), *self->GetClass()->GetName(), *buildableClass->GetName());
-        scope(self, buildableClass, runtimeData, InstanceData, Index);
-        AL_LOG("AFGBuildEffectActor::AddAbstractDataEntry END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, RemoveAbstractDataEntry, [](auto& scope, AFGBuildEffectActor* self, TSubclassOf< AFGBuildable > buildableClass, int32 index) {
-        AL_LOG("AFGBuildEffectActor::RemoveAbstractDataEntry START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        DumpBuildEffectActor("AFGBuildEffectActor::RemoveAbstractDataEntry BEFORE", self);
-        scope(self, buildableClass, index);
-        DumpBuildEffectActor("AFGBuildEffectActor::RemoveAbstractDataEntry AFTER", self);
-        AL_LOG("AFGBuildEffectActor::RemoveAbstractDataEntry END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, SetActor, [](auto& scope, AFGBuildEffectActor* self, AActor* InSourceActor) {
-        AL_LOG("AFGBuildEffectActor::SetActor START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, InSourceActor);
-        AL_LOG("AFGBuildEffectActor::SetActor END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, SetActors, [](auto& scope, AFGBuildEffectActor* self, TArray<AActor*> InSourceActors) {
-        AL_LOG("AFGBuildEffectActor::SetActors START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self, InSourceActors);
-        AL_LOG("AFGBuildEffectActor::SetActors END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, SetRecipe, [](auto& scope, AFGBuildEffectActor* self, TSubclassOf<UFGRecipe> inRecipe, AFGBuildable* buildable) {
-        AL_LOG("AFGBuildEffectActor::SetRecipe START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        if (buildable)
-        {
-            AL_LOG("AFGBuildEffectActor::SetRecipe: buildable %s (%s)", *buildable->GetName(), *buildable->GetClass()->GetName());
-        }
-        scope(self, inRecipe, buildable);
-        AL_LOG("AFGBuildEffectActor::SetRecipe END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, MarkAsBlueprintBuildEffect, [](auto& scope, AFGBuildEffectActor* self) {
-        AL_LOG("AFGBuildEffectActor::MarkAsBlueprintBuildEffect START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        DumpBuildEffectActor("AFGBuildableSubsystem::MarkAsBlueprintBuildEffect RESULT", self);
-        scope(self);
-        AL_LOG("AFGBuildEffectActor::MarkAsBlueprintBuildEffect END");
-        });
-
-    //SUBSCRIBE_UOBJECT_METHOD_AFTER(AFGBuildEffectActor, GetBind, [](FBuildEffectEnded& result, AFGBuildEffectActor* self, UClass* actorClass) {
-    //    AL_LOG("AFGBuildEffectActor::GetBind AFTER START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-    //    });
-
-    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, SpawnCostEffectActor, [](auto& scope, AFGBuildEffectActor* self, const FTransform& SpawnLocation, FVector TargetLocation, float TargetExtent, TSubclassOf<UFGItemDescriptor> Item) {
-    //    AL_LOG("AFGBuildEffectActor::SpawnCostEffectActor START %s (%s). Spawn At: %s. Target: %s", *self->GetName(), *self->GetClass()->GetName(), *SpawnLocation.ToString(), *TargetLocation.ToString());
-    //    scope(self, SpawnLocation, TargetLocation, TargetExtent, Item);
-    //    AL_LOG("AFGBuildEffectActor::SpawnCostEffectActor END");
-    //    });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, Start, [](auto& scope, AFGBuildEffectActor* self) {
-        AL_LOG("AFGBuildEffectActor::Start START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        DumpBuildEffectActor("AFGBuildEffectActor::Start BEFORE", self);
-        scope(self);
-        DumpBuildEffectActor("AFGBuildEffectActor::Start AFTER", self);
-        AL_LOG("AFGBuildEffectActor::Start END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, Stop, [](auto& scope, AFGBuildEffectActor* self) {
-        AL_LOG("AFGBuildEffectActor::Stop START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        DumpBuildEffectActor("AFGBuildEffectActor::Stop BEFORE", self);
-        scope(self);
-        DumpBuildEffectActor("AFGBuildEffectActor::Stop AFTER", self);
-        AL_LOG("AFGBuildEffectActor::Stop END");
-        });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, CreateVisuals, [](auto& scope, AFGBuildEffectActor* self) {
-        AL_LOG("AFGBuildEffectActor::CreateVisuals START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        DumpBuildEffectActor("AFGBuildEffectActor::CreateVisuals BEFORE", self);
-        scope(self);
-        DumpBuildEffectActor("AFGBuildEffectActor::CreateVisuals AFTER", self);
-        AL_LOG("AFGBuildEffectActor::CreateVisuals END");
-        });
-
-    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, ResolveMaterial, [](auto& scope, AFGBuildEffectActor* self, UMeshComponent* Mesh, const TArray<UMaterialInterface*>& Overrides) {
-    //    AL_LOG("AFGBuildEffectActor::ResolveMaterial START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-    //    scope(self, Mesh, Overrides);
-    //    AL_LOG("AFGBuildEffectActor::ResolveMaterial END");
-    //    });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, SetupThrowQueue, [](auto& scope, AFGBuildEffectActor* self) {
-        AL_LOG("AFGBuildEffectActor::SetupThrowQueue START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        DumpBuildEffectActor("AFGBuildEffectActor::SetupThrowQueue RESULT", self);
-        scope(self);
-        AL_LOG("AFGBuildEffectActor::SetupThrowQueue END");
-        });
-
-    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetTotalSplineLength, [](auto& scope, const AFGBuildEffectActor* self) {
-    //    AL_LOG("AFGBuildEffectActor::GetTotalSplineLength START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-    //    scope(self);
-    //    AL_LOG("AFGBuildEffectActor::GetTotalSplineLength END");
-    //    });
-
-    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, GetTransformOnSplines, [](auto& scope, const AFGBuildEffectActor* self, bool bWorldSpace) {
-    //    AL_LOG("AFGBuildEffectActor::GetTransformOnSplines START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-    //    auto transform = scope(self, bWorldSpace);
-    //    AL_LOG("AFGBuildEffectActor::GetTransformOnSplines END Transform: %s", *transform.ToString() );
-    //    return transform;
-    //    });
-
-    //SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, UpdateCostQueue, [](auto& scope, AFGBuildEffectActor* self) {
-    //    AL_LOG("AFGBuildEffectActor::UpdateCostQueue START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-    //    scope(self);
-    //    AL_LOG("AFGBuildEffectActor::UpdateCostQueue END");
-    //    });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildEffectActor, CalculateBuildEffectBounds, [](auto& scope, AFGBuildEffectActor* self) {
-        AL_LOG("AFGBuildEffectActor::CalculateBuildEffectBounds START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        DumpBuildEffectActor("AFGBuildEffectActor::CalculateBuildEffectBounds BEFORE", self);
-        scope(self);
-        DumpBuildEffectActor("AFGBuildEffectActor::CalculateBuildEffectBounds AFTER", self);
-        AL_LOG("AFGBuildEffectActor::CalculateBuildEffectBounds END");
-        });
-}
-
 void AutoLinkDebugging::RegisterRailTraceHooks()
 {
     /* UFGRailroadTrackConnectionComponent */
@@ -621,12 +329,6 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //    scope(self);
     //    AL_LOG("UFGRailroadTrackConnectionComponent::IsTrailingSwitch END");
     //    });
-
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, IsSwitchClear, [](auto& scope, const UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::IsSwitchClear START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::IsSwitchClear END");
-        });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetSwitchPosition, [](auto& scope, UFGRailroadTrackConnectionComponent* self, int32 position) {
         AL_LOG("UFGRailroadTrackConnectionComponent::SetSwitchPosition START %s (%s) - position: %d", *self->GetName(), *self->GetClass()->GetName(), position);
@@ -733,12 +435,6 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
     //    scope(self);
     //    AL_LOG("UFGRailroadTrackConnectionComponent::OnConnectionsChangedInternal END");
     //    });
-
-    SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, ClampSwitchPosition, [](auto& scope, UFGRailroadTrackConnectionComponent* self) {
-        AL_LOG("UFGRailroadTrackConnectionComponent::ClampSwitchPosition START %s (%s)", *self->GetName(), *self->GetClass()->GetName());
-        scope(self);
-        AL_LOG("UFGRailroadTrackConnectionComponent::ClampSwitchPosition END");
-        });
 
     SUBSCRIBE_UOBJECT_METHOD(UFGRailroadTrackConnectionComponent, SetSwitchControl, [](auto& scope, UFGRailroadTrackConnectionComponent* self, AFGBuildableRailroadSwitchControl* control) {
         AL_LOG("UFGRailroadTrackConnectionComponent::SetSwitchControl START %s, %s", *self->GetName(), *control->GetName());
@@ -1166,18 +862,6 @@ void AutoLinkDebugging::RegisterRailTraceHooks()
             scope(self);
             AL_LOG("AFGBuildableRailroadSwitchControl::OnBuildEffectActorFinished END");
         });
-
-    SUBSCRIBE_UOBJECT_METHOD(AFGBuildableRailroadSwitchControl, SetControlledConnection,
-        [](auto& scope, AFGBuildableRailroadSwitchControl* self, UFGRailroadTrackConnectionComponent* controlledConnection)
-        {
-            //AL_LOG("AFGBuildableRailroadSwitchControl::SetControlledConnection START %s", *self->GetName());
-            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::SetControlledConnection START", self, false);
-            DumpRailConnection("AFGBuildableRailroadSwitchControl::SetControlledConnection START", controlledConnection, true);
-            scope(self, controlledConnection);
-            DumpRailSwitchControl("AFGBuildableRailroadSwitchControl::SetControlledConnection END", self, false);
-            //AL_LOG("AFGBuildableRailroadSwitchControl::SetControlledConnection END");
-        });
-
 }
 
 void AutoLinkDebugging::RegisterPipeTraceHooks()
@@ -1602,7 +1286,6 @@ void AutoLinkDebugging::DumpRailConnection(FString prefix, const UFGRailroadTrac
     if (shortDump) return;
 
     DumpRailTrackPosition(FString(nestedPrefix).Append(TEXT(" mTrackPosition")), &c->mTrackPosition);
-    AL_LOG("%s mSwitchPosition: %d", *nestedPrefix, c->mSwitchPosition);
     DumpRailSignal(FString(nestedPrefix).Append(TEXT(" mFacingSignal")), c->mFacingSignal);
     DumpRailSignal(FString(nestedPrefix).Append(TEXT(" mTrailingSignal")), c->mTrailingSignal);
 }
@@ -1744,8 +1427,6 @@ void AutoLinkDebugging::DumpRailSwitchControl(FString prefix, const AFGBuildable
     DumpBuildableProperties(GetNestedPrefix(nestedPrefix), c);
 
     if (shortDump) return;
-
-    DumpRailConnection(FString(nestedPrefix).Append(" mControlledConnection"), c->mControlledConnection, true);
 }
 
 void AutoLinkDebugging::DumpRailSubsystem(FString prefix, const AFGRailroadSubsystem* s)
