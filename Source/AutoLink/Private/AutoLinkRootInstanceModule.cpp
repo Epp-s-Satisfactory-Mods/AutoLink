@@ -20,6 +20,7 @@
 #include "FGBuildablePipelineJunction.h"
 #include "FGBuildablePoleBase.h"
 #include "FGBuildablePowerPole.h"
+#include "FGBuildableRailroadAttachment.h"
 #include "FGBuildableRailroadSwitchControl.h"
 #include "FGBuildableRailroadTrack.h"
 #include "FGBuildableSpawnStrategy_RSC.h"
@@ -232,7 +233,7 @@ void UAutoLinkRootInstanceModule::FindAndLinkForBuildable(AFGBuildable* buildabl
 
     // Railroad connections
     {
-        TInlineComponentArray<UFGRailroadTrackConnectionComponent*> openConnections;
+        TInlineComponentArray<AutoLinkRailConnectionData> openConnections;
         FindOpenRailroadConnections(openConnections, buildable);
         AL_LOG("FindAndLinkForBuildable: Found %d open railroad connections", openConnections.Num());
         for (auto connection : openConnections)
@@ -493,7 +494,10 @@ void UAutoLinkRootInstanceModule::FindOpenHyperConnections(TInlineComponentArray
     }
 }
 
-void UAutoLinkRootInstanceModule::AddIfCandidate(TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections, UFGRailroadTrackConnectionComponent* connection)
+void UAutoLinkRootInstanceModule::AddIfCandidate(
+    TInlineComponentArray<AutoLinkRailConnectionData>& openConnections,
+    UFGRailroadTrackConnectionComponent* connection,
+    int maxAllowedConnections)
 {
     if (!connection)
     {
@@ -502,23 +506,40 @@ void UAutoLinkRootInstanceModule::AddIfCandidate(TInlineComponentArray<UFGRailro
     }
 
     auto numConnections = connection->GetConnections().Num();
-    if ( numConnections >= MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+    if (numConnections >= maxAllowedConnections)
     {
-        AL_LOG("\tAddIfCandidate: UFGRailroadTrackConnectionComponent is full with %d connections", numConnections);
+        AL_LOG("\tAddIfCandidate: UFGRailroadTrackConnectionComponent is full with %d of %d allowed connections", numConnections, maxAllowedConnections);
         return;
     }
 
-    openConnections.Add(connection);
+    if (numConnections == 1)
+    {
+        auto connectedTo = connection->GetConnection()->GetOwner();
+
+        if (connectedTo->IsA(AFGBuildableRailroadAttachment::StaticClass()) )
+        {
+            AL_LOG("\tAddIfCandidate: UFGRailroadTrackConnectionComponent is already connected to railroad attachment %s, so it cannot have any more connections.", *connectedTo->GetName());
+            return;
+        }
+    }
+
+    openConnections.Add({.Connection = connection, .MaxConnections = maxAllowedConnections});
 }
 
-void UAutoLinkRootInstanceModule::FindOpenRailroadConnections(TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections, AFGBuildable* buildable)
+void UAutoLinkRootInstanceModule::FindOpenRailroadConnections(TInlineComponentArray<AutoLinkRailConnectionData>& openConnections, AFGBuildable* buildable)
 {
     // Start with special cases where we know to get the connections without a full scan
     if (auto railroad = Cast<AFGBuildableRailroadTrack>(buildable))
     {
         AL_LOG("FindOpenRailroadConnections: AFGBuildableRailroadTrack %s", *railroad->GetName());
-        AddIfCandidate(openConnections, railroad->GetConnection(0));
-        AddIfCandidate(openConnections, railroad->GetConnection(1));
+        AddIfCandidate(openConnections, railroad->GetConnection(0), MAX_CONNECTIONS_PER_RAIL_CONNECTOR);
+        AddIfCandidate(openConnections, railroad->GetConnection(1), MAX_CONNECTIONS_PER_RAIL_CONNECTOR);
+    }
+    else if (auto attachment = Cast<AFGBuildableRailroadAttachment>(buildable))
+    {
+        // Rail buffer stops are the only currently-known attachments and they only allow 1 connection
+        AL_LOG("FindOpenRailroadConnections: AFGBuildableRailroadAttachment %s", *attachment->GetName());
+        AddIfCandidate(openConnections, attachment->GetConnection(), 1);
     }
     else
     {
@@ -528,7 +549,7 @@ void UAutoLinkRootInstanceModule::FindOpenRailroadConnections(TInlineComponentAr
         for (auto connectionComponent : connections)
         {
             AL_LOG("\tFindOpenRailroadConnections: Found UFGRailroadTrackConnectionComponent");
-            AddIfCandidate(openConnections, connectionComponent);
+            AddIfCandidate(openConnections, connectionComponent, MAX_CONNECTIONS_PER_RAIL_CONNECTOR);
         }
     }
 }
@@ -961,17 +982,18 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
     }
 }
 
-void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent)
+void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(AutoLinkRailConnectionData& connectionData)
 {
+    auto connectionComponent = connectionData.Connection;
+    auto maxConnectionComponentConnections = connectionData.MaxConnections;
     auto numStartingConnections = connectionComponent->GetConnections().Num();
-    if (numStartingConnections >= MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+    if (numStartingConnections >= maxConnectionComponentConnections)
     {
         AL_LOG("FindAndLinkCompatibleBeltConnection: Exiting because the connection component is already full");
         return;
     }
 
     auto connectorLocation = connectionComponent->GetConnectorLocation();
-    // Railroad connectors seem to be lower than the railroad hitboxes, so we need to adjust our search start up to ensure we actually hit adjacent railroads
     auto searchStart = connectorLocation;
     // Search a small extra distance from the connector. Though we will limit connections to 1 cm away, sometimes the hit box for the containing actor is a bit further
     auto searchRadius = 30.0f;
@@ -988,19 +1010,19 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         searchRadius,
         connectionOwner);
 
-    TArray< UFGRailroadTrackConnectionComponent* > candidates;
+    TArray<UFGRailroadTrackConnectionComponent*> candidates;
     for (auto actor : hitActors)
     {
         if (auto buildable = Cast<AFGBuildable>(actor))
         {
             AL_LOG("FindAndLinkCompatibleRailroadConnection: Examining hit result actor %s of type %s", *buildable->GetName(), *buildable->GetClass()->GetName());
-            TInlineComponentArray<UFGRailroadTrackConnectionComponent*> openConnections;
+            TInlineComponentArray<AutoLinkRailConnectionData> openConnections;
             FindOpenRailroadConnections(openConnections, buildable);
 
             AL_LOG("FindAndLinkCompatibleRailroadConnection:\tFound %d open railroad connections on hit result actor", openConnections.Num());
-            for (auto openConnection : openConnections)
+            for (auto& openConnection : openConnections)
             {
-                candidates.Add(openConnection);
+                candidates.Add(openConnection.Connection);
             }
         }
         else
@@ -1009,11 +1031,13 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         }
     }
 
+    bool connectioniIsRailAttachment = connectionComponent->GetOwner()->IsA(AFGBuildableRailroadAttachment::StaticClass());
+    bool involvesRailAttachment = connectioniIsRailAttachment;
     auto numCompatibleConnections = 0;
     TArray< UFGRailroadTrackConnectionComponent* > compatibleConnections;
     for (auto candidateConnection : candidates)
     {
-        AL_LOG("FindAndLinkCompatibleRailroadConnection: Examining connection: %s on %s at %s (%f units away)",
+        AL_LOG("FindAndLinkCompatibleRailroadConnection: Examining candidate connection: %s on %s at %s (%f units away)",
             *candidateConnection->GetName(),
             *candidateConnection->GetOwner()->GetName(),
             *candidateConnection->GetConnectorLocation().ToString(),
@@ -1026,6 +1050,17 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         }
 
         // Don't need to explicitly check for the candidate being full because that's done in AddIfCandidate
+
+        // We can only link the connection to a rail attachment candidate if the connection does not already have any connections
+        // or has not already been slated to autolink with another connection
+
+        auto candidateIsRailAttachment = candidateConnection->GetOwner()->IsA(AFGBuildableRailroadAttachment::StaticClass());
+        auto numExistingConnections = candidateConnection->GetConnections().Num();
+        if (candidateIsRailAttachment && numExistingConnections + numCompatibleConnections > 0)
+        {
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThis candidate is a rail attachment but the connection already has a connection (or has found a different connection to auto-link to)!");
+            continue;
+        }
 
         if (candidateConnection->GetConnections().Contains(connectionComponent))
         {
@@ -1074,8 +1109,15 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThis is a compatible connection! Saving it for linking. Location: %s", *candidateLocation.ToString());
         compatibleConnections.AddUnique(candidateConnection);
         ++numCompatibleConnections;
+        involvesRailAttachment = involvesRailAttachment || candidateIsRailAttachment;
 
-        if (numStartingConnections + numCompatibleConnections >= MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+        if (involvesRailAttachment)
+        {
+            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tWe've slated an attachment for auto-linking. They can only have one connection so breaking out of the search loop.");
+            break;
+        }
+
+        if (numStartingConnections + numCompatibleConnections >= maxConnectionComponentConnections)
         {
             AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d existing connections and we've found %d to link, which will fill it up. Breaking out of search loop and linking what we have.", numStartingConnections, numCompatibleConnections);
             break;
@@ -1090,12 +1132,12 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
         return;
     }
 
-    if (numStartingConnections + numCompatibleConnections > MAX_CONNECTIONS_PER_RAIL_CONNECTOR)
+    if (numStartingConnections + numCompatibleConnections > maxConnectionComponentConnections)
     {
         AL_LOG("FindAndLinkCompatibleRailroadConnection:\tThe connector started with %d connections and we saved %d more to connect, which sums to more than the allowed %d. This really shouldn't happen - there's a bug somewhere! Aborting!",
             numStartingConnections,
             numCompatibleConnections,
-            MAX_CONNECTIONS_PER_RAIL_CONNECTOR);
+            maxConnectionComponentConnections);
         return;
     }
 
@@ -1142,7 +1184,6 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
 
     // We've gathered switch data for the side of the scanning connection. Now we have to figure out if we need to make a new switch for any of the compatible connections.
 
-
     AFGBuildableRailroadSwitchControl* compatibleConnectionsBestSwitchControl = nullptr;
     TArray<UFGRailroadTrackConnectionComponent*> compatibleConnectionsSwitchControlGroup;
 
@@ -1188,29 +1229,40 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleRailroadConnection(UFGRai
     // overlapping tracks after the connection is made.
 
     auto connectionTrack = connectionComponent->GetTrack();
-
     auto railSubsystem = AFGRailroadSubsystem::Get(connectionComponent->GetWorld());
-    railSubsystem->RemoveTrack(connectionTrack);
+
+    // If this autolink involves a rail attachment, then removing the track prior to linking the attachment can crash the game. Thankfully,
+    // everything seems to work correctly if we just skip the remove/add step specifically for attachment linking.
+    if (!involvesRailAttachment)
+    {
+        railSubsystem->RemoveTrack(connectionTrack);
+    }
 
     for (auto compatibleConnection : compatibleConnections)
     {
-        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tLinking to connection %s on %s", *compatibleConnection->GetName(), *compatibleConnection->GetTrack()->GetName());
+        AL_LOG("FindAndLinkCompatibleRailroadConnection:\tLinking to connection %s on %s", *compatibleConnection->GetName(), *compatibleConnection->GetOwner()->GetName());
         connectionComponent->AddConnection(compatibleConnection);
     }
 
-    railSubsystem->AddTrack(connectionTrack);
-
-    for (auto compatibleConnection : compatibleConnections)
+    if (!involvesRailAttachment)
     {
-        auto linkedTrack = compatibleConnection->GetTrack();
-        if (linkedTrack->mOverlappingTracks.Contains(connectionTrack))
+        railSubsystem->AddTrack(connectionTrack);
+
+        for (auto compatibleConnection : compatibleConnections)
         {
-            AL_LOG("FindAndLinkCompatibleRailroadConnection:\tTrack %s still thinks it's overlapping the base track. Updating it.", *linkedTrack->GetName());
-            linkedTrack->UpdateOverlappingTracks();
+            auto linkedTrack = compatibleConnection->GetTrack();
+            if (linkedTrack->mOverlappingTracks.Contains(connectionTrack))
+            {
+                AL_LOG("FindAndLinkCompatibleRailroadConnection:\tTrack %s still thinks it's overlapping the base track. Updating it.", *linkedTrack->GetName());
+                linkedTrack->UpdateOverlappingTracks();
+            }
         }
     }
 
     // Now that tracks are connected and updated, we can update or create necessary switch controls.
+    // Note that if a connection has a switch control with 2 connections and 1 gets removed, the game doesn't immediately clean up the switch control, seeming
+    // to rely on a periodic cleanup process of some kind.  So if we auto-link to that connection point before it's cleaned up, we will still detect the switch
+    // control and attempt to update it but it will never be visible.
     if (compatibleConnectionsSwitchControlGroup.Num() > 1)
     {
         AL_LOG("FindAndLinkCompatibleRailroadConnection:\tAutoLinking means the placed connection will need or update a switch control.")

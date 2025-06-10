@@ -16,6 +16,12 @@
 
 #define MAX_CONNECTIONS_PER_RAIL_CONNECTOR 3
 
+struct AutoLinkRailConnectionData
+{
+    UFGRailroadTrackConnectionComponent* Connection;
+    int MaxConnections;
+};
+
 UCLASS()
 class AUTOLINK_API UAutoLinkRootInstanceModule : public UGameInstanceModule
 {
@@ -62,10 +68,11 @@ public:
         AFGBuildable* buildable);
 
     static void AddIfCandidate(
-        TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections,
-        UFGRailroadTrackConnectionComponent* connection);
+        TInlineComponentArray<AutoLinkRailConnectionData>& openConnections,
+        UFGRailroadTrackConnectionComponent* connection,
+        int maxAllowedConnections);
     static void FindOpenRailroadConnections(
-        TInlineComponentArray<UFGRailroadTrackConnectionComponent*>& openConnections,
+        TInlineComponentArray<AutoLinkRailConnectionData>& openConnections,
         AFGBuildable* buildable);
 
     static void HitScan(
@@ -85,7 +92,7 @@ public:
     // which will never be the right result and can involve some deep, unnecessary searching. Allows us to skip it.
 
     static void FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionComponent* connectionComponent);
-    static void FindAndLinkCompatibleRailroadConnection(UFGRailroadTrackConnectionComponent* connectionComponent);
+    static void FindAndLinkCompatibleRailroadConnection(AutoLinkRailConnectionData& connectionData);
 
     // These functions return true if it found and connected something
     static bool FindAndLinkCompatibleFluidConnection(UFGPipeConnectionComponent* connectionComponent, const TArray<UClass*>& incompatibleClasses);
