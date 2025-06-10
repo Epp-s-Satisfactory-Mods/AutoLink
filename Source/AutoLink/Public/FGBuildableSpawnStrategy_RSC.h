@@ -22,5 +22,5 @@ public:
     virtual bool IsCompatibleWith(AFGBuildable* buildable) const override;
     virtual void PreSpawnBuildable(AFGBuildable* buildable) override;
 
-    UFGRailroadTrackConnectionComponent* mControlledConnection;
+    TArray<UFGRailroadTrackConnectionComponent*> mControlledConnections;
 };

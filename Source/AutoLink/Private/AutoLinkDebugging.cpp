@@ -1421,12 +1421,18 @@ void AutoLinkDebugging::DumpRailSwitchControl(FString prefix, const AFGBuildable
 
     AL_LOG("%s AFGBuildableRailroadSwitchControl is %s at %s", *prefix, *c->GetName(), *c->GetTransform().ToString());
     FString nestedPrefix = GetNestedPrefix(prefix);
+
+    for (int i = 0; i < c->GetControlledConnections().Num(); ++i)
+    {
+        AL_LOG("%s GetControlledConnections[%d] %s", *nestedPrefix, i, *c->GetControlledConnections()[i]->GetName());
+    }
+
+    if (shortDump) return;
+
     AL_LOG("%s mSwitchData.Position: %d", *nestedPrefix, c->mSwitchData.Position);
     AL_LOG("%s mSwitchData.NumPositions: %d", *nestedPrefix, c->mSwitchData.NumPositions);
     AL_LOG("%s mVisualState: %d", *nestedPrefix, c->mVisualState);
     DumpBuildableProperties(GetNestedPrefix(nestedPrefix), c);
-
-    if (shortDump) return;
 }
 
 void AutoLinkDebugging::DumpRailSubsystem(FString prefix, const AFGRailroadSubsystem* s)

@@ -93,4 +93,9 @@ public:
     static bool ConnectBestPipeCandidate(UFGPipeConnectionComponentBase* connectionComponent, TArray<UFGPipeConnectionComponentBase*>& candidates);
 
     static bool UnitVectorsArePointingInOppositeDirections(FVector firstUnitVector, FVector secondUnitVector, double cosineTolerance);
+
+    static void UpdateOrCreateSwitchControl(
+        UFGRailroadTrackConnectionComponent* anchorConnection,
+        AFGBuildableRailroadSwitchControl* existingSwitchControl,
+        TArray<UFGRailroadTrackConnectionComponent*>& finalSwitchControlConnections);
 };
