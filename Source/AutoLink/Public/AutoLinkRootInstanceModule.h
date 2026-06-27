@@ -91,6 +91,13 @@ public:
         AActor* ignoreActor); // The scan can resolve to the buildable we're trying to find connections for (and multiple times too),
     // which will never be the right result and can involve some deep, unnecessary searching. Allows us to skip it.
 
+    // When a conveyor attachment (splitter/merger of any kind) is placed directly on top of an existing belt, the
+    // base game only wires it in if the placement hologram happened to snap to the belt - which is fiddly and often
+    // fails, leaving the attachment overlapping an untouched belt. This detects a belt running straight through a
+    // just-built attachment, splits it, and routes both halves through the attachment so it actually distributes /
+    // merges the belt's items. Returns true if it split and linked a belt.
+    static bool TrySplitBeltForConveyorAttachment(AFGBuildable* buildable);
+
     static void FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionComponent* connectionComponent);
     static void FindAndLinkCompatibleRailroadConnection(AutoLinkRailConnectionData& connectionData);
 

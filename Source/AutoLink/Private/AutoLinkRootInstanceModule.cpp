@@ -13,6 +13,7 @@
 #include "Buildables/FGBuildableConveyorBase.h"
 #include "Buildables/FGBuildableConveyorBelt.h"
 #include "Buildables/FGBuildableConveyorLift.h"
+#include "FGConveyorChainActor.h"
 #include "Buildables/FGBuildableDecor.h"
 #include "Buildables/FGBuildableFactoryBuilding.h"
 #include "Buildables/FGBuildablePipeHyper.h"
@@ -223,6 +224,12 @@ void UAutoLinkRootInstanceModule::FindAndLinkForBuildable(AFGBuildable* buildabl
 
     // Belt connections
     {
+        // If a conveyor attachment (splitter/merger of any kind) was placed straight on top of an existing belt,
+        // split that belt and route both halves through the attachment. We do this before the normal end-to-end
+        // linking below so that the (now connected) pass-through connectors are skipped by FindOpenBeltConnections
+        // and only the attachment's remaining free connectors get the usual treatment.
+        TrySplitBeltForConveyorAttachment(buildable);
+
         TInlineComponentArray<UFGFactoryConnectionComponent*> openConnections;
         FindOpenBeltConnections(openConnections, buildable);
         AL_LOG("FindAndLinkForBuildable: Found %d open belt connections", openConnections.Num());
@@ -644,6 +651,197 @@ void UAutoLinkRootInstanceModule::OverlapScan(
     }
 }
 
+bool UAutoLinkRootInstanceModule::TrySplitBeltForConveyorAttachment(AFGBuildable* buildable)
+{
+    auto attachment = Cast<AFGBuildableConveyorAttachment>(buildable);
+    if (!attachment)
+    {
+        // Only conveyor attachments (splitters/mergers and their variants) get inserted into a belt.
+        return false;
+    }
+
+    // Tunables. These are intentionally a little generous so that hand-placed (un-snapped) attachments still get
+    // picked up, while staying tight enough to avoid grabbing a neighbouring/parallel belt.
+    constexpr float OverlapSearchRadius = 250.0f;       // How far around the attachment center to look for a belt.
+    constexpr float MaxDistanceThroughCenter = 150.0f;  // The belt's spline must pass at least this close to the center.
+    constexpr float BeltEndMargin = 50.0f;              // Don't split this close to a belt end (that's the normal end-link case).
+    constexpr float CutLocationTolerance = 10.0f;       // How close a new connector must be to the cut to count as "at the cut".
+    constexpr double CollinearCosineTolerance = 0.06;   // ~20 degrees of slop when matching connectors to the belt axis.
+
+    const auto attachmentCenter = attachment->GetActorLocation();
+    AL_LOG("TrySplitBeltForConveyorAttachment: Examining attachment %s (%s) at %s",
+        *attachment->GetName(), *attachment->GetClass()->GetName(), *attachmentCenter.ToString());
+
+    // 1) Find the belt that physically runs through the attachment body.
+    TArray<AActor*> hitActors;
+    OverlapScan(hitActors, attachment->GetWorld(), attachmentCenter, OverlapSearchRadius, attachment);
+
+    AFGBuildableConveyorBelt* beltToSplit = nullptr;
+    float splitOffset = 0.0f;
+    FVector splitLocation = FVector::ZeroVector;
+    FVector beltTangent = FVector::ZeroVector;
+    float bestDistance = MaxDistanceThroughCenter;
+
+    for (auto hitActor : hitActors)
+    {
+        auto belt = Cast<AFGBuildableConveyorBelt>(hitActor);
+        if (!belt)
+        {
+            continue;
+        }
+
+        const float offset = belt->FindOffsetClosestToLocation(attachmentCenter);
+
+        // Must be over the MIDDLE of the belt so there's belt left on both sides to become the two halves.
+        if (offset <= BeltEndMargin || offset >= belt->GetLength() - BeltEndMargin)
+        {
+            AL_LOG("TrySplitBeltForConveyorAttachment:\tBelt %s offset %f is at/near an end (length %f); the normal end-to-end link path covers this, skipping",
+                *belt->GetName(), offset, belt->GetLength());
+            continue;
+        }
+
+        FVector location;
+        FVector tangent;
+        belt->GetLocationAndDirectionAtOffset(offset, location, tangent);
+
+        // The belt has to actually pass through the attachment, not just be nearby. Keep the closest one.
+        const float distance = FVector::Distance(location, attachmentCenter);
+        if (distance > bestDistance)
+        {
+            AL_LOG("TrySplitBeltForConveyorAttachment:\tBelt %s passes %f units from the attachment center (not within the current best %f); skipping",
+                *belt->GetName(), distance, bestDistance);
+            continue;
+        }
+
+        beltToSplit = belt;
+        splitOffset = offset;
+        splitLocation = location;
+        beltTangent = tangent.GetSafeNormal(); // UnitVectorsArePointingInOppositeDirections assumes unit vectors
+        bestDistance = distance;
+    }
+
+    if (!beltToSplit)
+    {
+        AL_LOG("TrySplitBeltForConveyorAttachment: No belt runs through the attachment; leaving it alone");
+        return false;
+    }
+
+    // 2) Make sure this is a sensible pass-through placement: the attachment needs an OPEN input connector on the
+    //    upstream side of the cut and an OPEN output connector on the downstream side, both collinear with the belt.
+    //    (Side outputs of a splitter / side inputs of a merger are perpendicular and get filtered out here.) We use
+    //    each connector's projected offset along the belt - not the belt tangent's sign - to decide upstream vs
+    //    downstream, so this stays correct regardless of how the belt spline happens to be parameterised.
+    TInlineComponentArray<UFGFactoryConnectionComponent*> attachmentConnections;
+    attachment->GetComponents(attachmentConnections);
+
+    UFGFactoryConnectionComponent* inputConnection = nullptr;   // upstream side; will receive the upstream half
+    UFGFactoryConnectionComponent* outputConnection = nullptr;  // downstream side; will feed the downstream half
+    for (auto connection : attachmentConnections)
+    {
+        if (!connection || connection->IsConnected())
+        {
+            continue;
+        }
+
+        const FVector normal = connection->GetConnectorNormal();
+        const bool collinearWithBelt =
+            UnitVectorsArePointingInOppositeDirections(normal, beltTangent, CollinearCosineTolerance) ||
+            UnitVectorsArePointingInOppositeDirections(normal, -beltTangent, CollinearCosineTolerance);
+        if (!collinearWithBelt)
+        {
+            continue;
+        }
+
+        const float connectionOffset = beltToSplit->FindOffsetClosestToLocation(connection->GetConnectorLocation());
+
+        switch (connection->GetDirection())
+        {
+        case EFactoryConnectionDirection::FCD_INPUT:
+            if (!inputConnection && connectionOffset < splitOffset)
+            {
+                inputConnection = connection;
+            }
+            break;
+        case EFactoryConnectionDirection::FCD_OUTPUT:
+            if (!outputConnection && connectionOffset > splitOffset)
+            {
+                outputConnection = connection;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (!inputConnection || !outputConnection)
+    {
+        AL_LOG("TrySplitBeltForConveyorAttachment: Attachment is not aligned as a pass-through over the belt (open aligned input: %d, output: %d); leaving the belt intact",
+            inputConnection != nullptr, outputConnection != nullptr);
+        return false;
+    }
+
+    // 3) Split the belt at the attachment. connectNewConveyors=false leaves the two new inner ends OPEN (we route
+    //    them through the attachment rather than rejoining them across the cut). Split is the game's own primitive
+    //    for this exact scenario, so it handles resplining, registering the new belts with the buildable subsystem,
+    //    preserving the outer (neighbour) connections, and rebuilding the neighbouring chain actors.
+    AL_LOG("TrySplitBeltForConveyorAttachment: Splitting belt %s at offset %f (%s) to insert attachment %s",
+        *beltToSplit->GetName(), splitOffset, *splitLocation.ToString(), *attachment->GetName());
+
+    auto pieces = AFGBuildableConveyorBelt::Split(beltToSplit, splitOffset, false);
+    AL_LOG("TrySplitBeltForConveyorAttachment: Split produced %d piece(s)", pieces.Num());
+
+    // Depending on Split's implementation it may return both new halves, or keep the original belt as one half and
+    // return only the other. Cover both by also considering the original belt - but only if it's still valid (Split
+    // destroys it in the former case, so guard against a dangling pointer).
+    TArray<AFGBuildableConveyorBelt*> halfCandidates = pieces;
+    if (IsValid(beltToSplit))
+    {
+        halfCandidates.AddUnique(beltToSplit);
+    }
+
+    // 4) Identify the two halves by which of their ends sits at the cut: the upstream half's OUTPUT (Connection1) is
+    //    at the cut, and the downstream half's INPUT (Connection0) is at the cut.
+    UFGFactoryConnectionComponent* upstreamOut = nullptr;
+    UFGFactoryConnectionComponent* downstreamIn = nullptr;
+    for (auto piece : halfCandidates)
+    {
+        if (!piece)
+        {
+            continue;
+        }
+
+        auto pieceOut = piece->GetConnection1();
+        if (pieceOut && !pieceOut->IsConnected() &&
+            FVector::Distance(pieceOut->GetConnectorLocation(), splitLocation) <= CutLocationTolerance)
+        {
+            upstreamOut = pieceOut;
+        }
+
+        auto pieceIn = piece->GetConnection0();
+        if (pieceIn && !pieceIn->IsConnected() &&
+            FVector::Distance(pieceIn->GetConnectorLocation(), splitLocation) <= CutLocationTolerance)
+        {
+            downstreamIn = pieceIn;
+        }
+    }
+
+    if (!upstreamOut || !downstreamIn)
+    {
+        AL_LOG("TrySplitBeltForConveyorAttachment: After splitting, could not find both open cut ends (upstream out: %d, downstream in: %d). The belt was split but linking the halves through the attachment was skipped.",
+            upstreamOut != nullptr, downstreamIn != nullptr);
+        return false;
+    }
+
+    // 5) Route the items through the attachment. These are belt<->attachment links (the attachment terminates each
+    //    conveyor chain) so a plain SetConnection is correct here - exactly what the normal path already does when a
+    //    splitter/merger is placed at the very end of a belt.
+    AL_LOG("TrySplitBeltForConveyorAttachment: Linking upstream half -> attachment input, and attachment output -> downstream half");
+    upstreamOut->SetConnection(inputConnection);
+    outputConnection->SetConnection(downstreamIn);
+
+    return true;
+}
+
 void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactoryConnectionComponent* connectionComponent)
 {
     if (connectionComponent->IsConnected())
@@ -972,6 +1170,33 @@ void UAutoLinkRootInstanceModule::FindAndLinkCompatibleBeltConnection(UFGFactory
     {
         AL_LOG("FindAndLinkCompatibleBeltConnection: Removing, setting connection, and then re-adding conveyor so it will build the correct chain actor");
         auto buildableSybsystem = AFGBuildableSubsystem::Get(connectionComponent->GetWorld());
+
+        // Satisfactory 1.2 groups runs of connected conveyors into an AFGConveyorChainActor that the buildable
+        // subsystem ticks in parallel (AFGBuildableSubsystem::TickFactoryActors). Joining our conveyor onto an
+        // existing chain invalidates the chain actor(s) that the two conveyors currently belong to, so they have
+        // to be rebuilt.
+        //
+        // Those chain actors MUST be torn down via AFGBuildableSubsystem::ForceDestroyChainActor, which first
+        // removes them from the parallel tick buckets (and moves their items back onto the belts). If we instead
+        // just let RemoveConveyor/AddConveyor rebuild the merged chain, the still-live chain actor self-deletes
+        // (AFGConveyorChainActor::RevertChainActor_Unsafe) while it's still referenced by its tick group. That
+        // leaves a dangling pointer that crashes AFGConveyorChainActor::Factory_Tick on the next frame with an
+        // EXCEPTION_ACCESS_VIOLATION. See the note on RevertChainActor_Unsafe in FGConveyorChainActor.h. This was
+        // introduced in 1.2; in 1.1 there were no chain actors so the simple remove/add was sufficient.
+        auto connectionChainActor = connectionConveyor->GetConveyorChainActor();
+        if (connectionChainActor)
+        {
+            AL_LOG("FindAndLinkCompatibleBeltConnection: Safely destroying chain actor %s belonging to the new conveyor before linking", *connectionChainActor->GetName());
+            buildableSybsystem->ForceDestroyChainActor(connectionChainActor);
+        }
+
+        auto otherChainActor = otherConnectionConveyor->GetConveyorChainActor();
+        if (otherChainActor && otherChainActor != connectionChainActor)
+        {
+            AL_LOG("FindAndLinkCompatibleBeltConnection: Safely destroying chain actor %s belonging to the existing conveyor before linking", *otherChainActor->GetName());
+            buildableSybsystem->ForceDestroyChainActor(otherChainActor);
+        }
+
         buildableSybsystem->RemoveConveyor(connectionConveyor);
         connectionComponent->SetConnection(compatibleConnectionComponent);
         buildableSybsystem->AddConveyor(connectionConveyor);

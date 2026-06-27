@@ -1127,12 +1127,12 @@ void AutoLinkDebugging::DumpConnection(FString prefix, UFGPipeConnectionComponen
 
     AL_LOG("%s mPipeNetworkID: %d", *nestedPrefix, c->mPipeNetworkID);
     AL_LOG("%s mPipeConnectionType: %d", *nestedPrefix, c->mPipeConnectionType);
-    AL_LOG("%s mConnectorClearance: %d", *nestedPrefix, c->mConnectorClearance);
+    AL_LOG("%s mConnectorClearance: %f", *nestedPrefix, c->mConnectorClearance);
 
     AL_LOG("%s IsConnected: %d", *nestedPrefix, c->IsConnected());
     if (c->mConnectedComponent)
     {
-        AL_LOG("%s mConnectedComponent: %s at %x", *nestedPrefix, *c->mConnectedComponent->GetName(), c->mConnectedComponent);
+        AL_LOG("%s mConnectedComponent: %s at %x", *nestedPrefix, *c->mConnectedComponent->GetName(), c->mConnectedComponent.Get());
     }
     else
     {
@@ -1181,12 +1181,12 @@ void AutoLinkDebugging::DumpConnection(FString prefix, UFGPipeConnectionComponen
 
     AL_LOG("%s mDisallowSnappingTo: %d", *nestedPrefix, c->mDisallowSnappingTo);
     AL_LOG("%s mPipeConnectionType: %d", *nestedPrefix, c->mPipeConnectionType);
-    AL_LOG("%s mConnectorClearance: %d", *nestedPrefix, c->mConnectorClearance);
+    AL_LOG("%s mConnectorClearance: %f", *nestedPrefix, c->mConnectorClearance);
 
     AL_LOG("%s IsConnected: %d", *nestedPrefix, c->IsConnected());
     if (c->mConnectedComponent)
     {
-        AL_LOG("%s mConnectedComponent: %s at %x", *nestedPrefix, *c->mConnectedComponent->GetName(), c->mConnectedComponent);
+        AL_LOG("%s mConnectedComponent: %s at %x", *nestedPrefix, *c->mConnectedComponent->GetName(), c->mConnectedComponent.Get());
     }
     else
     {
